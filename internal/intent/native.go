@@ -18,6 +18,7 @@ func Native() Authenticate {
 		if err != nil {
 			return approval.Unavailable
 		}
+
 		return result.Decision
 	}
 }

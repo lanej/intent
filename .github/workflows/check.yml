@@ -16,8 +16,14 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+      - name: Strict Windows-target Go quality
+        if: runner.os == 'Linux'
+        run: make quality-windows
       - run: go vet ./...
       - run: go test -race ./...
+      - name: Strict native Go quality
+        if: runner.os == 'macOS'
+        run: make check
       - run: go build ./cmd/intent
       - run: python3 scripts/check-assets.py
         if: runner.os != 'Windows'

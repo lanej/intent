@@ -1,0 +1,2 @@
+# Preserve the installer-generated JSON bytes recorded by source-code pins.
+.golangci.strict.json whitespace=-blank-at-eof

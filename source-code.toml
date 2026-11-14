@@ -1,0 +1,11 @@
+schema_version = 1
+mode = "tracked"
+stage = "beta"
+skills = ["go"]
+agents = "codex"
+pr_template = "none"
+detect_languages = false
+
+[checks.go]
+enabled = true
+rollout = "strict"
