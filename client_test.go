@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -97,10 +98,11 @@ func TestInvalidResponsesPreserveUncertainty(t *testing.T) {
 
 					return
 				case "oversized":
-					var checkedErr5 error
-
-					_, checkedErr5 = conn.Write([]byte(strings.Repeat("x", approvalwire.MaxFrame) + "\n"))
-					testutil.Check(t, checkedErr5)
+					// The client can close as soon as the limit is reached, before
+					// the fixture finishes sending the oversized frame.
+					if _, writeErr := conn.Write([]byte(strings.Repeat("x", approvalwire.MaxFrame) + "\n")); writeErr != nil && !errors.Is(writeErr, syscall.EPIPE) && !errors.Is(writeErr, syscall.ECONNRESET) {
+						t.Error(writeErr)
+					}
 
 					return
 				}
