@@ -1,0 +1,4 @@
+/bin/
+/dist/
+/native/build/
+.DS_Store
