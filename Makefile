@@ -1,4 +1,6 @@
-.PHONY: build install check lint fmt native clean
+GO_PROFILE_TOOLCHAIN := go$(shell sed -n 's/^go //p' go.mod)
+
+.PHONY: build install check quality quality-windows lint lint-windows fmt native clean
 PREFIX ?= $(HOME)/.local
 build:
 	mkdir -p bin
@@ -6,16 +8,21 @@ build:
 install: build
 	install -d "$(PREFIX)/bin"
 	install -m 755 bin/intent "$(PREFIX)/bin/intent"
-check:
-	@test -z "$$(gofmt -s -l .)" || (gofmt -s -l .; exit 1)
-	go vet ./...
-	go test -race ./...
+check: quality
 	python3 scripts/check-assets.py
+quality:
+	GOTOOLCHAIN="$(GO_PROFILE_TOOLCHAIN)" python3 scripts/check-source-code.py go
 lint:
-	golangci-lint run
+	GOTOOLCHAIN="$(GO_PROFILE_TOOLCHAIN)" bash scripts/check-go.sh lint
 fmt:
-	golangci-lint fmt
+	GOTOOLCHAIN="$(GO_PROFILE_TOOLCHAIN)" bash scripts/check-go.sh fmt
 native:
 	python3 scripts/build-native.py
 clean:
 	rm -rf bin dist native/build
+
+lint-windows:
+	GOOS=windows CGO_ENABLED=0 GOTOOLCHAIN="$(GO_PROFILE_TOOLCHAIN)" bash scripts/check-go.sh lint
+
+quality-windows: lint-windows
+	GOOS=windows CGO_ENABLED=0 GOTOOLCHAIN="$(GO_PROFILE_TOOLCHAIN)" bash scripts/check-go.sh vuln

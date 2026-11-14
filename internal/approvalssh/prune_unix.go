@@ -3,12 +3,15 @@
 package approvalssh
 
 import (
+	"context"
 	"errors"
 	"net"
 	"os"
 	"path/filepath"
 	"syscall"
 	"time"
+
+	"github.com/lanej/intent/internal/cleanup"
 
 	"github.com/lanej/intent/internal/approvaldiscovery"
 	"github.com/lanej/intent/internal/approvalwire"
@@ -22,35 +25,45 @@ func pruneStaleApprovals() error {
 	if os.Getenv("SSH_CONNECTION") == "" {
 		return nil
 	}
+
 	path, err := approvaldiscovery.Path()
 	if err != nil {
 		return err
 	}
+
 	dir := filepath.Dir(path)
 	if err = approvaldiscovery.PrivateDir(dir, false); os.IsNotExist(err) {
 		return nil
 	}
+
 	if err != nil {
 		return err
 	}
+
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return err
 	}
+
 	deadline := time.Now().Add(time.Second)
+
 	removed := 0
 	for _, entry := range entries {
 		if removed >= 64 || !time.Now().Before(deadline) {
 			break
 		}
+
 		if filepath.Ext(entry.Name()) != ".json" {
 			continue
 		}
+
 		candidate := filepath.Join(dir, entry.Name())
+
 		receipt, err := approvaldiscovery.ReadPath(candidate)
 		if err != nil || !approvalwire.ValidID(receipt.Session) || !validRemoteSocket(receipt.Socket) {
 			continue
 		}
+
 		if err = checkRemote(receipt.Session, receipt.Socket); os.IsNotExist(err) {
 			// A missing directory is already clean, but its receipt can remain after
 			// an interrupted cleanup. Re-read identity before removing the receipt.
@@ -60,18 +73,21 @@ func pruneStaleApprovals() error {
 		} else if err != nil {
 			continue
 		} else {
-			conn, e := net.DialTimeout("unix", receipt.Socket, 100*time.Millisecond)
+			conn, e := (&net.Dialer{Timeout: 100 * time.Millisecond}).DialContext(context.Background(), "unix", receipt.Socket)
 			if e == nil {
-				conn.Close()
+				cleanup.Close(conn)
 				continue
 			}
+
 			if !errors.Is(e, syscall.ENOENT) && !errors.Is(e, syscall.ECONNREFUSED) {
 				continue
 			}
+
 			if cleanupEndpoint(receipt.Session, receipt.Socket) != nil {
 				continue
 			}
 		}
+
 		current, err := approvaldiscovery.ReadPath(candidate)
 		if err == nil && current == receipt {
 			if err = os.Remove(candidate); err == nil {
@@ -79,5 +95,6 @@ func pruneStaleApprovals() error {
 			}
 		}
 	}
+
 	return nil
 }

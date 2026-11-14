@@ -8,7 +8,7 @@ Intent collects approval. Your application owns what the approval permits and mu
 
 Download the archive for your platform from [Releases](https://github.com/lanej/intent/releases), verify it against `SHA256SUMS`, and put `intent` on your PATH. CLI archives support macOS and Linux on arm64 and amd64. macOS native approval requires macOS 13 or later. Windows native approval and SSH setup are unsupported.
 
-Alternatively, with Go 1.26 or newer:
+Alternatively, with Go 1.26.11 or newer:
 
 ```sh
 go install github.com/lanej/intent/cmd/intent@v0.1.0
@@ -72,7 +72,7 @@ if result.Decision != intent.Approved {
 return deploy(ctx, "abc123")
 ```
 
-The SDK manages a private helper process and its lifecycle without requiring an installed `intent` CLI or AppKit setup in your process. Titles are limited to 256 bytes, summaries to 16 KiB, and scrollable details to 32 KiB; all must be UTF-8 without control or formatting characters except tabs and newlines. Label caller-supplied claims in your review. Non-macOS native calls return `Unavailable`.
+The SDK manages a private helper process and its lifecycle without requiring an installed `intent` CLI or AppKit setup in your process. Titles are limited to 256 bytes, summaries to 64 KiB, and scrollable details to 256 KiB; all must be UTF-8 without control or formatting characters except tabs and newlines. Label caller-supplied claims in your review. Non-macOS native calls return `Unavailable`.
 
 ## Lifetime and trust
 
@@ -99,3 +99,9 @@ Use `intent request` instead of `keylease approval request`, `intent ssh` instea
 ## License
 
 MIT. Extracted from the author's Keylease approval implementation into a clean public history.
+
+## Go quality
+
+`make check` runs the tracked strict Go profile: formatting, the preserved legacy lint gate, exhaustive enums and sum types, checked errors, security analysis, uncached race tests, and reachable-vulnerability analysis. There is no grandfathered lint baseline. `make lint` runs the lint portion and `make fmt` applies the profile's formatting. Checks select the Go patch version in `go.mod` because the pinned profile linter requires that toolchain; builds may use a compatible newer Go release.
+
+`source-code.toml` records the tracked beta profile and Codex guidance. Use `source-code setup --dry-run` to preview policy changes and `source-code validate --strict` to verify installed packages and pins. CI runs the full strict gate on Linux and macOS. `make quality-windows` cross-checks Windows lint and reachable vulnerabilities; native Windows CI retains its build and race tests. A passing profile does not establish human native authentication.

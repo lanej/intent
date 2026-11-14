@@ -19,33 +19,46 @@ import (
 func TestMain(m *testing.M) {
 	if os.Getenv("INTENT_HOOK_FAKE_NATIVE") == "1" && len(os.Args) == 4 && os.Args[2] == "--control" {
 		var err error
+
 		switch os.Args[1] {
 		case "ssh-hook":
 			err = SSHHook(context.Background(), os.Args[3])
 		case "ssh-broker":
 			err = runHookBroker(context.Background(), os.Args[3], func(ctx context.Context, p intent.Prompt) approval.Decision {
-				f, e := os.OpenFile(os.Getenv("INTENT_HOOK_PROMPT_LOG"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+				f, e := os.OpenFile(os.Getenv("INTENT_HOOK_PROMPT_LOG"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) // #nosec G703 -- This path belongs to the controlled disposable test fixture.
 				if e != nil {
 					return approval.Unavailable
 				}
+
 				e = json.NewEncoder(f).Encode(p)
-				f.Close()
+				if checkErr := f.Close(); checkErr != nil {
+					os.Exit(2)
+				}
+
 				if e != nil {
 					return approval.Unavailable
 				}
+
 				if strings.HasSuffix(p.Reason, "deny") {
 					return approval.Denied
 				}
+
 				return approval.Approved
 			})
 		default:
 			os.Exit(2)
 		}
+
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
+			if _, checkErr := fmt.Fprintln(os.Stderr, err); checkErr != nil {
+				os.Exit(2)
+			}
+
 			os.Exit(1)
 		}
+
 		os.Exit(0)
 	}
+
 	os.Exit(m.Run())
 }

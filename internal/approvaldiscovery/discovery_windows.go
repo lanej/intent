@@ -13,5 +13,6 @@ type Receipt struct {
 func Read() (Receipt, error) {
 	return Receipt{}, errors.New("SSH approval discovery requires macOS or Linux")
 }
+
 func Path() (string, error)            { return "", errors.New("SSH approval discovery requires macOS or Linux") }
 func ReadPath(string) (Receipt, error) { return Read() }

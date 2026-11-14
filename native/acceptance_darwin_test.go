@@ -16,6 +16,7 @@ func TestHumanAcceptance(t *testing.T) {
 	if os.Getenv("INTENT_NATIVE_ACCEPTANCE") != "1" {
 		t.Skip("human interaction required; set INTENT_NATIVE_ACCEPTANCE=1")
 	}
+
 	for _, test := range []struct {
 		reason string
 		want   intent.Decision

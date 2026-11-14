@@ -14,15 +14,21 @@ import (
 	"os"
 	"time"
 
+	"github.com/lanej/intent/internal/cleanup"
+
 	"github.com/lanej/intent/internal/approvaldiscovery"
 	"github.com/lanej/intent/internal/approvalwire"
 )
 
-const SocketEnv = "INTENT_APPROVAL_SOCKET"
-const DefaultTimeout = 2 * time.Minute
+const (
+	SocketEnv      = "INTENT_APPROVAL_SOCKET"
+	DefaultTimeout = 2 * time.Minute
+)
 
-type Request struct{ Reason string }
-type Decision string
+type (
+	Request  struct{ Reason string }
+	Decision string
+)
 
 const (
 	Approved    Decision = "approved"
@@ -56,8 +62,10 @@ func ClientFromEnv() (*Client, error) {
 		if err != nil {
 			return nil, fmt.Errorf("discover approval socket: %w", err)
 		}
+
 		return &Client{discoveryPath: discoveryPath}, nil
 	}
+
 	return NewClient(path), nil
 }
 
@@ -68,51 +76,69 @@ func (c *Client) Approve(ctx context.Context, request Request) (Result, error) {
 	if !approvalwire.ValidReason(request.Reason) {
 		return Result{}, errors.New("reason must be nonempty UTF-8, at most 4096 bytes, without control or formatting characters")
 	}
+
 	if c == nil || c.socketPath == "" && c.discoveryPath == "" {
 		return Result{}, errors.New("approval socket is required")
 	}
+
 	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
 	defer cancel()
+
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
+
 	path := c.socketPath
 	if c.discoveryPath != "" {
 		var err error
+
 		path, err = c.discover(ctx)
 		if err != nil {
 			return Result{}, err
 		}
 	}
+
 	conn, err := (&net.Dialer{}).DialContext(ctx, "unix", path)
 	if err != nil {
 		return Result{}, fmt.Errorf("connect approval socket: %w", err)
 	}
-	defer conn.Close()
+	defer cleanup.Close(conn)
+
 	deadline, _ := ctx.Deadline()
-	_ = conn.SetDeadline(deadline)
-	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	if err = conn.SetDeadline(deadline); err != nil {
+		return Result{}, fmt.Errorf("set approval deadline: %w", err)
+	}
+
+	stop := context.AfterFunc(ctx, func() { cleanup.Close(conn) })
 	defer stop()
+
 	nonce := make([]byte, 16)
 	if _, err = rand.Read(nonce); err != nil {
 		return Result{}, err
 	}
+
 	id := hex.EncodeToString(nonce)
 	r := approvalwire.Request{Version: approvalwire.Version, ID: id, Reason: request.Reason, TimeoutMS: max(1, time.Until(deadline).Milliseconds())}
+
 	var response approvalwire.Response
+
 	err = json.NewEncoder(conn).Encode(r)
 	if err == nil {
 		err = approvalwire.Read(conn, &response)
 	}
+
 	if err != nil {
 		if ctx.Err() != nil {
 			return Result{}, ctx.Err()
 		}
+
 		if !time.Now().Before(deadline) {
 			return Result{}, context.DeadlineExceeded
 		}
-		return Result{}, fmt.Errorf("%w: %v", ErrOutcomeUnknown, err)
+
+		return Result{}, fmt.Errorf("%w: %w", ErrOutcomeUnknown, err)
 	}
+
 	return decisionResult(ctx, id, response)
 }
 
@@ -121,14 +147,17 @@ func (c *Client) Approve(ctx context.Context, request Request) (Result, error) {
 func (c *Client) discover(parent context.Context) (string, error) {
 	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
+
 	for {
 		receipt, err := approvaldiscovery.ReadPath(c.discoveryPath)
 		if err == nil {
 			return receipt.Socket, nil
 		}
+
 		if !os.IsNotExist(err) {
 			return "", fmt.Errorf("discover approval socket: %w", err)
 		}
+
 		select {
 		case <-ctx.Done():
 			return "", fmt.Errorf("SSH approval setup unavailable: %w", ctx.Err())
@@ -143,18 +172,23 @@ func decisionResult(ctx context.Context, id string, response approvalwire.Respon
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
+
 	if deadline, ok := ctx.Deadline(); ok && !time.Now().Before(deadline) {
 		return Result{}, context.DeadlineExceeded
 	}
+
 	if response.Version != approvalwire.Version || response.ID != id {
 		return Result{}, fmt.Errorf("%w: invalid response identity or version", ErrOutcomeUnknown)
 	}
+
 	if response.Error != "" {
 		if response.Decision != "" {
 			return Result{}, fmt.Errorf("%w: conflicting response", ErrOutcomeUnknown)
 		}
+
 		return Result{}, fmt.Errorf("approval service: %s", response.Error)
 	}
+
 	decision := Decision(response.Decision)
 	switch decision {
 	case Approved, Denied, Cancelled, TimedOut, Unavailable, Busy:

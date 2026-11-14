@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "rollout": "strict",
+  "config": ".golangci.strict.json",
+  "legacy": {
+    "path": ".golangci.yml",
+    "sha256": "ea211bb44ea38a0c2227ba983f581feeaf8c85b28cdda9535a7521af3b9758b0"
+  }
+}

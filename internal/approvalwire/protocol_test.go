@@ -21,6 +21,7 @@ func TestFrameLimitsAndStrictDecoding(t *testing.T) {
 	}
 	// Preserve bytes following the first frame for disconnect/pipelining detection.
 	data := bytes.NewBufferString("{}\nextra")
+
 	var r Request
 	if err := Read(data, &r); err != nil || data.String() != "extra" {
 		t.Fatal(data.String(), err)
