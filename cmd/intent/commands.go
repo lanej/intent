@@ -65,10 +65,10 @@ func approvalCommand(ctx context.Context, args []string) error {
 			return err
 		}
 
-		withTimeoutErr, cancel := context.WithTimeout(ctx, *timeout)
+		requestCtx, cancel := context.WithTimeout(ctx, *timeout)
 		defer cancel()
 
-		result, err := client.Approve(withTimeoutErr, approval.Request{Reason: *reason})
+		result, err := client.Approve(requestCtx, approval.Request{Reason: *reason})
 		if err != nil {
 			return err
 		}
