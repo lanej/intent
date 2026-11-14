@@ -105,7 +105,7 @@
     ".agents/skills/go/assets/check-go.sh": {
       "executable": true,
       "kind": "file",
-      "sha256": "3cdeacc7766e0afa61cc1fcdbe00f34bd81b52414c4c80184043bcd245695c73"
+      "sha256": "8f1f0041f8afefbcfc3e424fa998972ac923cf314ee20ed1153b5d5e64f1b89c"
     },
     ".agents/skills/go/assets/go-quality.json": {
       "executable": false,
@@ -120,7 +120,7 @@
     ".agents/skills/go/assets/go-quality.yml": {
       "executable": false,
       "kind": "file",
-      "sha256": "5eae5e8701f6f91bbefed3fc09f743146c55e81112332f708fecc05098dfe178"
+      "sha256": "ea91828030970b2a437a9554aaf9014552ad75709a2adb29e8bdc7d093805282"
     },
     ".agents/skills/go/assets/golangci.yml": {
       "executable": false,
@@ -130,7 +130,7 @@
     ".agents/skills/go/references/correctness.md": {
       "executable": false,
       "kind": "file",
-      "sha256": "a123570047feed802062592f811bec7b7e79d0fd2864f4ddc35fcb8b0a4e0aa1"
+      "sha256": "5637a11dcc26b6258b2cf416e16dc8df497af264445bcdaa69b028a3cb9fdaf9"
     },
     ".agents/skills/library-code-comments/SKILL.md": {
       "executable": false,
@@ -220,7 +220,7 @@
     ".agents/source-code-versions.json": {
       "executable": false,
       "kind": "file",
-      "sha256": "7180ad80b6d6cdb09267fb15955ad871d88454a5ec3f4a63cd729f210fdf4d24"
+      "sha256": "1fe57a0c00a8526f5d15c1ccbc4ed98565fbedf134ed770c92b23ed99ad7e072"
     },
     ".github/workflows/go-quality.yml": {
       "executable": false,
@@ -240,17 +240,17 @@
     ".source-code.json": {
       "executable": false,
       "kind": "file",
-      "sha256": "5dade709ee41bc6d225af12c35cbef8a05d3d0f6f19f85954635db05496ba20f"
+      "sha256": "3070d76a1c7b753031761338d0d58d9892dad2386d77f53808456fbd1b0314f5"
     },
     "AGENTS.override.md": {
       "executable": false,
       "kind": "file",
-      "sha256": "788c90619e61dc5c16d0f39f02776065556cf378a2c09a06490640fc9f40a6f5"
+      "sha256": "df429cd56c6ae5a86987edf73851dcc0df63f2d61ea87fc2e7a095a30647ddc0"
     },
     "scripts/check-go.sh": {
       "executable": true,
       "kind": "file",
-      "sha256": "3cdeacc7766e0afa61cc1fcdbe00f34bd81b52414c4c80184043bcd245695c73"
+      "sha256": "8f1f0041f8afefbcfc3e424fa998972ac923cf314ee20ed1153b5d5e64f1b89c"
     },
     "scripts/check-source-code.py": {
       "executable": false,
@@ -275,7 +275,7 @@
     "code-comments": "1.0.0",
     "data-change-planning": "1.0.0",
     "git": "1.0.0",
-    "go": "1.0.0",
+    "go": "1.0.1",
     "library-code-comments": "1.0.0",
     "pr-writer": "1.0.0",
     "source-code-lifecycle": "1.0.0",
@@ -293,7 +293,7 @@
     "source-code-lifecycle",
     "testing"
   ],
-  "source_revision": "3e741fbbab159a26d4a3cca17637815dc16a0032",
+  "source_revision": "b1684a97eed06ac49bfe54db012f935eaaa84d62",
   "stage": "beta",
   "version": 1
 }

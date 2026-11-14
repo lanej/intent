@@ -7,7 +7,7 @@ struct Request: Decodable { let version: Int; let request_id: String; let review
 // One process handles one immutable request. Only the authentication callback
 // may return an explicit, request-bound approval to its parent.
 let data = FileHandle.standardInput.readDataToEndOfFile()
-guard data.count <= 262144, let request = try? JSONDecoder().decode(Request.self, from: data),
+guard data.count <= 1048576, let request = try? JSONDecoder().decode(Request.self, from: data),
       request.version == 1, request.request_id.count == 32,
       !request.review.title.isEmpty else { exit(2) }
 func review(_ request: Request) -> Never {
@@ -23,9 +23,9 @@ func review(_ request: Request) -> Never {
     }
     let alert = NSAlert()
     alert.messageText = request.review.title
-    alert.informativeText = request.review.summary
+    alert.informativeText = "Review the complete request below before authenticating."
     let text = NSTextView(frame: NSRect(x: 0, y: 0, width: 560, height: 240))
-    text.string = request.review.details
+    text.string = request.review.summary + "\n\n" + request.review.details
     text.isEditable = false
     text.isSelectable = true
     text.isVerticallyResizable = true

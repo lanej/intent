@@ -72,7 +72,7 @@ if result.Decision != intent.Approved {
 return deploy(ctx, "abc123")
 ```
 
-The SDK manages a private helper process and its lifecycle without requiring an installed `intent` CLI or AppKit setup in your process. Titles are limited to 256 bytes, summaries to 16 KiB, and scrollable details to 32 KiB; all must be UTF-8 without control or formatting characters except tabs and newlines. Label caller-supplied claims in your review. Non-macOS native calls return `Unavailable`.
+The SDK manages a private helper process and its lifecycle without requiring an installed `intent` CLI or AppKit setup in your process. Titles are limited to 256 bytes, summaries to 64 KiB, and scrollable details to 256 KiB; all must be UTF-8 without control or formatting characters except tabs and newlines. Label caller-supplied claims in your review. Non-macOS native calls return `Unavailable`.
 
 ## Lifetime and trust
 

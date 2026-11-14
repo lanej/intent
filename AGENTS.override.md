@@ -14,7 +14,7 @@ The authoritative pins and stage are in `.source-code.json`; this file is their 
 | code-comments | 1.0.0 |
 | data-change-planning | 1.0.0 |
 | git | 1.0.0 |
-| go | 1.0.0 |
+| go | 1.0.1 |
 | library-code-comments | 1.0.0 |
 | pr-writer | 1.0.0 |
 | source-code-lifecycle | 1.0.0 |

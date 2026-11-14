@@ -17,8 +17,8 @@ func TestMain(m *testing.M) {
 	if mode := os.Getenv("INTENT_TEST_HELPER"); mode != "" {
 		var p prompt
 
-		data, err := io.ReadAll(io.LimitReader(os.Stdin, 262145))
-		if err != nil || len(data) > 262144 || json.Unmarshal(data, &p) != nil {
+		data, err := io.ReadAll(io.LimitReader(os.Stdin, 1048577))
+		if err != nil || len(data) > 1048576 || json.Unmarshal(data, &p) != nil {
 			os.Exit(2)
 		}
 
@@ -116,7 +116,7 @@ func TestAcceptedEscapeHeavyReviewFitsNativeFrame(t *testing.T) {
 
 	t.Setenv("INTENT_TEST_HELPER", "approved")
 
-	review := approval.Review{Title: strings.Repeat("&", 256), Summary: strings.Repeat("<", 16384), Details: strings.Repeat(">", 32768)}
+	review := approval.Review{Title: strings.Repeat("&", 256), Summary: strings.Repeat("<", approval.MaxReviewSummary), Details: strings.Repeat(">", approval.MaxReviewDetails)}
 	if validateErr := validate(review); validateErr != nil {
 		t.Fatal(validateErr)
 	}

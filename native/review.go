@@ -11,10 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
-	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/lanej/intent"
 	"github.com/lanej/intent/internal/approvalwire"
@@ -60,25 +57,7 @@ func Review(ctx context.Context, review intent.Review) (intent.Result, error) {
 	return run(ctx, helper, p)
 }
 
-func validate(r intent.Review) error {
-	if strings.TrimSpace(r.Title) == "" || len(r.Title) > 256 || len(r.Summary) > 16384 || len(r.Details) > 32768 {
-		return errors.New("invalid review size or empty title")
-	}
-
-	for _, s := range []string{r.Title, r.Summary, r.Details} {
-		if !utf8.ValidString(s) {
-			return errors.New("review must be UTF-8")
-		}
-
-		for _, c := range s {
-			if (unicode.IsControl(c) && c != '\n' && c != '\t') || unicode.Is(unicode.Cf, c) {
-				return errors.New("review contains control or formatting characters")
-			}
-		}
-	}
-
-	return nil
-}
+func validate(r intent.Review) error { return r.Validate() }
 
 func run(ctx context.Context, helper string, p prompt) (intent.Result, error) {
 	var data bytes.Buffer
