@@ -276,16 +276,13 @@ func (b *broker) selectRoute(ctx context.Context, r registration) (*route, error
 		return nil, errors.New("different Mac; explicit pairing change required")
 	}
 
-	probe, err := (&net.Dialer{Timeout: time.Second}).DialContext(ctx, "unix", r.Socket)
-	if err != nil {
+	if err := probeRoute(ctx, r); err != nil {
 		if cleanupErr := approvalssh.Cleanup(r.Session, r.Socket); cleanupErr != nil {
 			log.Print(cleanupErr)
 		}
 
-		return nil, errors.New("forwarding is not ready")
+		return nil, fmt.Errorf("approval service is not ready: %w", err)
 	}
-
-	cleanup.Close(probe)
 
 	selected := &route{registration: r}
 	b.sessions[r.Session] = selected
@@ -293,6 +290,43 @@ func (b *broker) selectRoute(ctx context.Context, r registration) (*route, error
 	b.selected = selected
 
 	return selected, nil
+}
+
+// An invalid request must receive the service's protocol rejection before the
+// route can displace another. It cannot enter the native authentication path.
+func probeRoute(ctx context.Context, r registration) error {
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+
+	conn, err := (&net.Dialer{}).DialContext(ctx, "unix", r.Socket)
+	if err != nil {
+		return err
+	}
+	defer cleanup.Close(conn)
+
+	stop := context.AfterFunc(ctx, func() { cleanup.Close(conn) })
+	defer stop()
+
+	deadline, _ := ctx.Deadline()
+	if err := conn.SetDeadline(deadline); err != nil {
+		return err
+	}
+
+	// Empty reason and zero timeout are invalid even for protocol version 1.
+	if err := json.NewEncoder(conn).Encode(approvalwire.Request{Version: approvalwire.Version, ID: r.Session}); err != nil {
+		return err
+	}
+
+	var response approvalwire.Response
+	if err := approvalwire.Read(conn, &response); err != nil {
+		return err
+	}
+
+	if response.Version != approvalwire.Version || response.ID != r.Session || response.Decision != "" || response.Error != "invalid approval request or unsupported version" {
+		return errors.New("unexpected readiness response")
+	}
+
+	return nil
 }
 
 func (b *broker) removeRoute(selected *route) {

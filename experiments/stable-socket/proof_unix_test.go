@@ -126,7 +126,13 @@ func preparedRoute(t *testing.T, session string, decision approval.Decision) reg
 
 	done := make(chan error, 1)
 
-	service := &local.Service{Authenticate: func(context.Context, local.Prompt) approval.Decision { return decision }}
+	service := &local.Service{Authenticate: func(_ context.Context, prompt local.Prompt) approval.Decision {
+		if !approvalwire.ValidReason(prompt.Reason) {
+			t.Error("readiness probe reached native authentication")
+		}
+
+		return decision
+	}}
 	go func() { done <- service.Serve(ctx, listener) }()
 
 	t.Cleanup(func() {
@@ -183,6 +189,79 @@ func TestRemoteSetupOutputIsBounded(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUnusableRoutePreservesSelection(t *testing.T) {
+	dir := temporary(t)
+	startBroker(t, dir)
+	a := preparedRoute(t, strings.Repeat("5", 32), approval.Approved)
+
+	current, ack := registerRoute(t, dir, a)
+	if ack.Error != "" {
+		t.Fatal(ack.Error)
+	}
+
+	for i, mode := range []string{"disconnected destination", "silent destination", "unexpected response"} {
+		t.Run(mode, func(t *testing.T) {
+			session := strings.Repeat(fmt.Sprint(i+6), 32)
+
+			var output bytes.Buffer
+			testutil.Check(t, approvalssh.Prepare(session, &output))
+
+			var endpoint struct {
+				Socket string `json:"socket"`
+			}
+			testutil.Check(t, json.Unmarshal(output.Bytes(), &endpoint))
+			listener, err := (&net.ListenConfig{}).Listen(t.Context(), "unix", endpoint.Socket)
+			testutil.Check(t, err)
+			t.Cleanup(func() { cleanup.Close(listener); testutil.Check(t, approvalssh.Cleanup(session, endpoint.Socket)) })
+			testutil.Check(t, os.Chmod(endpoint.Socket, 0o600))
+
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+
+				conn, acceptErr := listener.Accept()
+				if acceptErr != nil {
+					return
+				}
+				defer cleanup.Close(conn)
+
+				if mode == "disconnected destination" {
+					return
+				}
+
+				var request approvalwire.Request
+				if approvalwire.Read(conn, &request) != nil {
+					return
+				}
+
+				if mode == "unexpected response" {
+					if err := json.NewEncoder(conn).Encode(approvalwire.Response{Version: 1, ID: request.ID, Decision: "approved"}); err != nil {
+						t.Error(err)
+					}
+
+					return
+				}
+
+				var extra [1]byte
+				if _, err := conn.Read(extra[:]); err == nil {
+					t.Error("unexpected additional probe data")
+				}
+			}()
+
+			_, rejected := registerRoute(t, dir, registration{Version: 1, Mac: pairedMac, Session: session, Socket: endpoint.Socket})
+			if rejected.Error == "" {
+				t.Fatal("unusable destination displaced working route")
+			}
+
+			<-done
+			expectDecision(t, filepath.Join(dir, "approval.sock"), "original route survives", approval.Approved)
+		})
+	}
+
+	cleanup.Close(current)
+	eventually(t, "selected transport cleanup", func() bool { _, err := os.Stat(filepath.Dir(a.Socket)); return os.IsNotExist(err) })
 }
 
 func TestStableSocketRouteOwnership(t *testing.T) {
