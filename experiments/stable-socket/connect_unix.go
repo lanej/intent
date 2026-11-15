@@ -22,15 +22,19 @@ import (
 	local "github.com/lanej/intent/internal/intent"
 )
 
-type limitedBuffer struct{ bytes.Buffer }
+// Keep the buffer named: embedding would promote ReadFrom and let io.Copy
+// bypass Write when exec.Cmd collects remote stdout.
+type limitedBuffer struct{ data bytes.Buffer }
 
 func (b *limitedBuffer) Write(data []byte) (int, error) {
-	if b.Len()+len(data) > approvalwire.MaxFrame {
+	if b.data.Len()+len(data) > approvalwire.MaxFrame {
 		return 0, errors.New("remote setup output exceeds bound")
 	}
 
-	return b.Buffer.Write(data)
+	return b.data.Write(data)
 }
+
+func (b *limitedBuffer) Bytes() []byte { return b.data.Bytes() }
 
 func quote(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'" }
 

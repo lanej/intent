@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -161,6 +162,26 @@ func expectDecision(t *testing.T, socket, reason string, want approval.Decision)
 	result, err := approval.NewClient(socket).Approve(ctx, approval.Request{Reason: reason})
 	if err != nil || result.Decision != want {
 		t.Fatalf("want %s, got %+v: %v", want, result, err)
+	}
+}
+
+func TestRemoteSetupOutputIsBounded(t *testing.T) {
+	for _, size := range []int{approvalwire.MaxFrame, approvalwire.MaxFrame + 1} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			var output limitedBuffer
+			// LimitedReader has no WriterTo: this exercises io.Copy's destination
+			// fast path, including the promoted ReadFrom that bypassed the old guard.
+			source := io.LimitReader(strings.NewReader(strings.Repeat("x", size)), int64(size))
+
+			_, err := io.Copy(&output, source)
+			if (err == nil) != (size <= approvalwire.MaxFrame) {
+				t.Fatalf("size %d: %v", size, err)
+			}
+
+			if len(output.Bytes()) > approvalwire.MaxFrame {
+				t.Fatal("remote stdout exceeded its frame bound")
+			}
+		})
 	}
 }
 
@@ -345,6 +366,40 @@ func TestNoControlMasterOpenSSH(t *testing.T) {
 
 	eventually(t, "old callback cancelled", func() bool { _, statErr := os.Stat(oldMarker + ".cancelled"); return statErr == nil })
 	expectDecision(t, socket, "proof approve", approval.Approved)
+
+	// Cancel the caller without stopping SSH. The late synthetic Approved must
+	// be discarded, and this same registered transport must remain usable.
+	callerCtx, cancelCaller := context.WithCancel(t.Context())
+	callerDone := make(chan error, 1)
+
+	go func() {
+		_, approveErr := approval.NewClient(socket).Approve(callerCtx, approval.Request{Reason: "proof pending"})
+		callerDone <- approveErr
+	}()
+
+	eventually(t, "caller cancellation prompt", func() bool { _, statErr := os.Stat(marker); return statErr == nil })
+	cancelCaller()
+
+	if callerErr := <-callerDone; !errors.Is(callerErr, context.Canceled) {
+		t.Fatalf("caller cancellation lost context: %v", callerErr)
+	}
+
+	eventually(t, "caller cancellation reaches native callback", func() bool { _, statErr := os.Stat(marker + ".cancelled"); return statErr == nil })
+	eventually(t, "same route releases cancelled prompt", func() bool {
+		result, approveErr := approval.NewClient(socket).Approve(t.Context(), approval.Request{Reason: "proof deny"})
+		if approveErr != nil {
+			t.Fatal(approveErr)
+		}
+
+		if result.Decision != approval.Denied && result.Decision != approval.Busy {
+			t.Fatalf("unexpected post-cancel decision: %s", result.Decision)
+		}
+
+		return result.Decision == approval.Denied
+	})
+	expectDecision(t, socket, "proof approve", approval.Approved)
+	testutil.Check(t, os.Remove(marker))
+	testutil.Check(t, os.Remove(marker+".cancelled"))
 
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
