@@ -92,6 +92,8 @@ The automatic broker stops with its SSH master without sustaining idle connectio
 
 A [stable remote socket design and executable proof](experiments/stable-socket/README.md) explores a separate non-multiplexed transport. It is not installed or enabled by the production CLI.
 
+A [structured Mac approval preview](experiments/mac-review/README.md) explores application branding and human presentation of structured requests. It is a standalone, inert prototype; no production approval interface changes.
+
 Human authentication and rendered interaction remain unverified. To exercise them explicitly on your Mac, run `INTENT_NATIVE_ACCEPTANCE=1 go test -v ./native -run TestHumanAcceptance`: authenticate the first request and deny the second. Repeat for each available method; only the method actually exercised is verified.
 
 ## Migrate from Keylease

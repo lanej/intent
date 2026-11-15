@@ -1,0 +1,421 @@
+import AppKit
+import Foundation
+
+// Prototype inputs deliberately remain separate from Intent's public Review API.
+struct Brand: Decodable {
+    let name: String
+    let accent: String
+    let accentDark: String?
+    let symbol: String
+    let icon: String?
+}
+struct Fact: Decodable {
+    let label: String
+    let value: String
+    let callerSupplied: Bool
+}
+struct Credential: Decodable {
+    let name: String
+    let variable: String
+}
+struct Consequence: Decodable {
+    let title: String
+    let description: String
+}
+struct Card: Decodable {
+    var brand: Brand
+    let title: String
+    let summary: String
+    let facts: [Fact]
+    let credentials: [Credential]
+    let consequence: Consequence?
+    let details: [Fact]
+}
+
+func color(_ hex: String) -> NSColor {
+    let number = UInt32(hex, radix: 16) ?? 0x269D79
+    return NSColor(srgbRed: CGFloat((number >> 16) & 255) / 255,
+                   green: CGFloat((number >> 8) & 255) / 255,
+                   blue: CGFloat(number & 255) / 255, alpha: 1)
+}
+
+// Explicit AppKit drawing keeps the prototype's controls visible in PDF/PNG
+// exports even when a locked graphical session cannot composite glass controls.
+// NSButton/NSPopUpButton still own hit testing, menus, actions and accessibility.
+final class PreviewButton: NSButton {
+    override func draw(_ dirtyRect: NSRect) {
+        let primary = keyEquivalent == "\r"
+        if bezelStyle != .inline {
+            (isHighlighted ? NSColor.selectedControlColor : (primary ? NSColor.controlAccentColor : NSColor.controlBackgroundColor)).setFill()
+            NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 7, yRadius: 7).fill()
+            NSColor.separatorColor.setStroke()
+            NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 7, yRadius: 7).stroke()
+        }
+        let text = (bezelStyle == .inline ? (title.hasPrefix("Hide") ? "⌄  " : "›  ") : "") + title
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font ?? NSFont.systemFont(ofSize: 13),
+            .foregroundColor: primary ? NSColor.white : NSColor.labelColor
+        ]
+        let size = (text as NSString).size(withAttributes: attributes)
+        (text as NSString).draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2), withAttributes: attributes)
+        if window?.firstResponder === self {
+            NSColor.keyboardFocusIndicatorColor.setStroke()
+            let ring = NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: 7, yRadius: 7)
+            ring.lineWidth = 2
+            ring.stroke()
+        }
+    }
+}
+final class PreviewPopup: NSPopUpButton {
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.controlBackgroundColor.setFill()
+        let rect = NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 5, yRadius: 5)
+        rect.fill()
+        NSColor.separatorColor.setStroke()
+        rect.stroke()
+        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.labelColor]
+        ((titleOfSelectedItem ?? "") as NSString).draw(at: NSPoint(x: 8, y: 4), withAttributes: attributes)
+        ("⌄" as NSString).draw(at: NSPoint(x: bounds.width - 16, y: 4), withAttributes: attributes)
+        if window?.firstResponder === self {
+            NSColor.keyboardFocusIndicatorColor.setStroke()
+            rect.lineWidth = 2
+            rect.stroke()
+        }
+    }
+}
+final class PreviewCheckbox: NSButton {
+    override func draw(_ dirtyRect: NSRect) {
+        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.labelColor]
+        let mark = state == .on ? "☑" : "☐"
+        ("\(mark) \(title)" as NSString).draw(at: NSPoint(x: 0, y: 3), withAttributes: attributes)
+        if window?.firstResponder === self {
+            NSColor.keyboardFocusIndicatorColor.setStroke()
+            NSBezierPath(rect: bounds.insetBy(dx: 1, dy: 1)).stroke()
+        }
+    }
+}
+final class FlippedDocument: NSView { override var isFlipped: Bool { true } }
+final class Surface: NSView {
+    let fill: NSColor
+    init(fill: NSColor) { self.fill = fill; super.init(frame: .zero) }
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    override func draw(_ dirtyRect: NSRect) {
+        fill.setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: 10, yRadius: 10).fill()
+    }
+}
+
+final class Preview: NSObject, NSApplicationDelegate {
+    let root: URL
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 760),
+                          styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                          backing: .buffered, defer: false)
+    let cases = PreviewPopup()
+    let appearance = PreviewPopup()
+    let branding = PreviewPopup()
+    let larger = PreviewCheckbox(title: "Larger text", target: nil, action: nil)
+    let status = NSTextField(labelWithString: "")
+    var resultMessage = ""
+    var expanded = false
+    var card: Card!
+    var scale: CGFloat { larger.state == .on ? 1.2 : 1 }
+    var accent: NSColor { color(appearance.indexOfSelectedItem == 1 ? (card.brand.accentDark ?? card.brand.accent) : card.brand.accent) }
+
+    init(root: URL) {
+        self.root = root
+        super.init()
+        cases.addItems(withTitles: ["Credential access", "Long request", "Plaintext file"])
+        appearance.addItems(withTitles: ["Light", "Dark"])
+        branding.addItems(withTitles: ["Keylease", "Example app"])
+        for popup in [cases, appearance, branding] {
+            popup.target = self
+            popup.action = #selector(change)
+        }
+        larger.setButtonType(.switch)
+        larger.target = self
+        larger.action = #selector(change)
+        window.title = "Intent · Approval preview"
+        window.minSize = NSSize(width: 620, height: 650)
+        window.isReleasedWhenClosed = false
+        window.center()
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        let menu = NSMenu()
+        let item = NSMenuItem()
+        menu.addItem(item)
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "Quit Preview", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        item.submenu = appMenu
+        NSApp.mainMenu = menu
+        reload()
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        if let index = CommandLine.arguments.firstIndex(of: "--capture"), CommandLine.arguments.count > index + 1 {
+            let output = URL(fileURLWithPath: CommandLine.arguments[index + 1], isDirectory: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.captureVariants(output) }
+        }
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    func label(_ value: String, size: CGFloat = 13, weight: NSFont.Weight = .regular,
+               secondary: Bool = false, mono: Bool = false) -> NSTextField {
+        let field = NSTextField(wrappingLabelWithString: value)
+        field.font = mono ? .monospacedSystemFont(ofSize: size * scale, weight: weight)
+                          : .systemFont(ofSize: size * scale, weight: weight)
+        field.textColor = secondary ? .secondaryLabelColor : .labelColor
+        field.isSelectable = true
+        field.setContentCompressionResistancePriority(.required, for: .vertical)
+        return field
+    }
+
+    func stack(_ views: [NSView], spacing: CGFloat = 12, horizontal: Bool = false) -> NSStackView {
+        let view = NSStackView(views: views)
+        view.orientation = horizontal ? .horizontal : .vertical
+        view.alignment = horizontal ? .centerY : .leading
+        view.spacing = spacing
+        view.translatesAutoresizingMaskIntoConstraints = false
+        return view
+    }
+
+    func pin(_ child: NSView, in parent: NSView, inset: CGFloat = 0) {
+        child.translatesAutoresizingMaskIntoConstraints = false
+        parent.addSubview(child)
+        NSLayoutConstraint.activate([
+            child.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: inset),
+            child.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -inset),
+            child.topAnchor.constraint(equalTo: parent.topAnchor, constant: inset),
+            child.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -inset)
+        ])
+    }
+
+    func symbol(_ name: String, tint: NSColor, size: CGFloat = 18) -> NSImageView {
+        let view = NSImageView(image: NSImage(systemSymbolName: name, accessibilityDescription: nil) ?? NSImage())
+        view.contentTintColor = tint
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.widthAnchor.constraint(equalToConstant: size).isActive = true
+        view.heightAnchor.constraint(equalToConstant: size).isActive = true
+        view.setAccessibilityElement(false)
+        return view
+    }
+
+    func panel(_ content: NSView, tint: NSColor? = nil) -> NSView {
+        let box = Surface(fill: tint?.withAlphaComponent(0.08) ?? NSColor.quaternaryLabelColor.withAlphaComponent(0.12))
+        pin(content, in: box, inset: 14)
+        return box
+    }
+
+    func fullWidth(_ child: NSView, in parent: NSStackView) {
+        parent.addArrangedSubview(child)
+        child.widthAnchor.constraint(equalTo: parent.widthAnchor).isActive = true
+    }
+
+    func fact(_ item: Fact) -> NSView {
+        let heading = label(item.label.uppercased(), size: 10, weight: .semibold, secondary: true)
+        let title: NSView
+        if item.callerSupplied {
+            let claim = label("Caller supplied", size: 10, secondary: true)
+            title = stack([heading, claim], spacing: 8, horizontal: true)
+        } else { title = heading }
+        return stack([title, label(item.value, size: 13, mono: item.label == "Requested command")], spacing: 5)
+    }
+
+    @objc func change() {
+        resultMessage = ""
+        reload()
+    }
+
+    func reload() {
+        do {
+            let names = ["credentials", "long-request", "plaintext"]
+            let data = try Data(contentsOf: root.appendingPathComponent("fixtures/\(names[cases.indexOfSelectedItem]).json"))
+            card = try JSONDecoder().decode(Card.self, from: data)
+            if branding.indexOfSelectedItem == 1 {
+                let brand = try Data(contentsOf: root.appendingPathComponent("fixtures/example-brand.json"))
+                card.brand = try JSONDecoder().decode(Brand.self, from: brand)
+            }
+        } catch {
+            fputs("Preview fixture: \(error)\n", stderr)
+            exit(1)
+        }
+        window.appearance = NSAppearance(named: appearance.indexOfSelectedItem == 1 ? .darkAqua : .aqua)
+        window.appearance?.performAsCurrentDrawingAppearance { render() }
+    }
+
+    func render() {
+        let content = Surface(fill: NSColor.windowBackgroundColor)
+        window.contentView = content
+        let rootStack = stack([], spacing: 16)
+        pin(rootStack, in: content, inset: 24)
+        fullWidth(stack([symbol("flask", tint: .secondaryLabelColor, size: 14),
+                         label("DESIGN PREVIEW · NO ACTIONS RUN", size: 10, weight: .semibold, secondary: true)], spacing: 6, horizontal: true), in: rootStack)
+        cases.setAccessibilityLabel("Sample request")
+        appearance.setAccessibilityLabel("Appearance")
+        branding.setAccessibilityLabel("Application branding")
+        let controls = stack([cases, branding, appearance, larger], spacing: 8, horizontal: true)
+        // Controls stay at system size while the approval itself scales.
+        for view in [cases, branding, appearance] { view.controlSize = .small }
+        larger.controlSize = .small
+        fullWidth(controls, in: rootStack)
+
+        let scroll = NSScrollView()
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.scrollerStyle = .legacy
+        fullWidth(scroll, in: rootStack)
+        scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 300).isActive = true
+        let document = FlippedDocument()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        scroll.documentView = document
+        document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor).isActive = true
+        let body = stack([], spacing: 20)
+        pin(body, in: document, inset: 1)
+
+        let brandName = card.brand.name
+        let icon = NSImageView()
+        if let path = card.brand.icon {
+            icon.image = NSImage(contentsOf: root.appendingPathComponent(path))
+        } else { icon.image = NSImage(systemSymbolName: card.brand.symbol, accessibilityDescription: nil) }
+        icon.contentTintColor = accent
+        icon.imageScaling = .scaleProportionallyUpOrDown
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        icon.heightAnchor.constraint(equalToConstant: 44).isActive = true
+        icon.setAccessibilityElement(false)
+        let identity = stack([icon, stack([label(brandName, size: 14, weight: .semibold),
+                                         label("Approval presented by Intent", size: 11, secondary: true)], spacing: 3)], spacing: 10, horizontal: true)
+        fullWidth(identity, in: body)
+        fullWidth(stack([label(card.title, size: 25, weight: .semibold), label(card.summary, size: 14, secondary: true)], spacing: 8), in: body)
+
+        if let consequence = card.consequence {
+            fullWidth(panel(stack([symbol("exclamationmark.triangle", tint: .systemOrange),
+                                   stack([label(consequence.title, size: 13, weight: .semibold),
+                                          label(consequence.description, size: 12)], spacing: 5)], spacing: 10, horizontal: true), tint: .systemOrange), in: body)
+        }
+
+        let facts = stack([], spacing: 16)
+        for item in card.facts { fullWidth(fact(item), in: facts) }
+        fullWidth(panel(facts), in: body)
+
+        let credentials = stack([label("CREDENTIALS", size: 10, weight: .semibold, secondary: true)], spacing: 12)
+        for credential in card.credentials {
+            let row = stack([symbol("key.horizontal", tint: accent, size: 16),
+                             stack([label(credential.name, size: 13, weight: .medium),
+                                    label(credential.variable, size: 11, secondary: true, mono: true)], spacing: 3)], spacing: 10, horizontal: true)
+            fullWidth(row, in: credentials)
+        }
+        fullWidth(credentials, in: body)
+        fullWidth(label("Commands in this session may read these credentials.", size: 12, secondary: true), in: body)
+
+        let disclosure = PreviewButton(title: expanded ? "Hide technical details" : "Show technical details", target: self, action: #selector(toggleDetails))
+        disclosure.bezelStyle = .inline
+        disclosure.image = NSImage(systemSymbolName: expanded ? "chevron.down" : "chevron.right", accessibilityDescription: nil)
+        disclosure.imagePosition = .imageLeading
+        disclosure.setAccessibilityLabel(expanded ? "Hide technical details" : "Show technical details")
+        body.addArrangedSubview(disclosure)
+        if expanded {
+            let details = stack([], spacing: 12)
+            for item in card.details { fullWidth(fact(item), in: details) }
+            fullWidth(panel(details), in: body)
+        }
+
+        let separator = NSBox()
+        separator.boxType = .separator
+        fullWidth(separator, in: rootStack)
+        status.font = .systemFont(ofSize: 11)
+        status.textColor = .secondaryLabelColor
+        status.setAccessibilityLabel("Preview result")
+        fullWidth(status, in: rootStack)
+        let deny = PreviewButton(title: "Deny", target: self, action: #selector(denyPreview))
+        deny.bezelStyle = .rounded
+        deny.keyEquivalent = "\u{1b}"
+        let next = PreviewButton(title: "Continue to authentication…", target: self, action: #selector(continuePreview))
+        next.bezelStyle = .rounded
+        next.keyEquivalent = "\r"
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let footer = stack([spacer, deny, next], spacing: 10, horizontal: true)
+        fullWidth(footer, in: rootStack)
+        window.initialFirstResponder = deny
+        window.contentView?.layoutSubtreeIfNeeded()
+        status.stringValue = resultMessage.isEmpty && document.frame.height > scroll.contentView.bounds.height
+            ? "Scroll to review the full request." : resultMessage
+    }
+
+    @objc func toggleDetails() { expanded.toggle(); reload() }
+    @objc func denyPreview() { resultMessage = "Preview: denied. No approval was issued."; status.stringValue = resultMessage }
+    @objc func continuePreview() {
+        let sheet = NSAlert()
+        sheet.messageText = "Authentication preview"
+        sheet.informativeText = "A production request would now ask macOS to authenticate you. This preview does not invoke authentication or issue an approval."
+        sheet.addButton(withTitle: "Back to review")
+        sheet.beginSheetModal(for: window) { _ in
+            self.resultMessage = "Preview completed. No approval was issued."
+            self.status.stringValue = self.resultMessage
+        }
+    }
+
+    func captureVariants(_ directory: URL) {
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            for (name, sample, dark, large, details, brand) in [
+                ("keylease-light", 0, false, false, false, 0),
+                ("keylease-dark", 0, true, false, false, 0),
+                ("plaintext-light", 2, false, false, false, 0),
+                ("details-dark", 0, true, false, true, 0),
+                ("long-large", 1, false, true, true, 0),
+                ("application-brand", 0, false, false, false, 1),
+                ("bounded-large", 1, false, true, true, 0)
+            ] {
+                cases.selectItem(at: sample)
+                appearance.selectItem(at: dark ? 1 : 0)
+                branding.selectItem(at: brand)
+                larger.state = large ? .on : .off
+                expanded = details
+                // Fit the full document for review artifacts; the interactive
+                // window retains its bounded viewport and native scrolling.
+                window.setContentSize(NSSize(width: name == "bounded-large" ? 620 : 680, height: name == "bounded-large" ? 650 : (large ? 1160 : (details ? 970 : (sample == 2 ? 860 : 730)))))
+                reload()
+                guard let view = window.contentView,
+                      let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(view.bounds.width * 2),
+                                                    pixelsHigh: Int(view.bounds.height * 2), bitsPerSample: 8,
+                                                    samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                                    colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+                      let context = NSGraphicsContext(bitmapImageRep: bitmap) else { throw PreviewError.capture }
+                bitmap.size = view.bounds.size
+                var rendered: NSImage?
+                window.appearance?.performAsCurrentDrawingAppearance {
+                    rendered = NSImage(data: view.dataWithPDF(inside: view.bounds))
+                }
+                guard let rendered else { throw PreviewError.capture }
+                window.appearance?.performAsCurrentDrawingAppearance {
+                    NSGraphicsContext.saveGraphicsState()
+                    NSGraphicsContext.current = context
+                    context.cgContext.scaleBy(x: 2, y: 2)
+                    NSColor.windowBackgroundColor.setFill()
+                    view.bounds.fill()
+                    rendered.draw(in: view.bounds)
+                    NSGraphicsContext.restoreGraphicsState()
+                }
+                guard let png = bitmap.representation(using: .png, properties: [:]) else { throw PreviewError.capture }
+                try png.write(to: directory.appendingPathComponent(name + ".png"))
+            }
+            print("Captured seven native AppKit variants in \(directory.path)")
+            NSApp.terminate(nil)
+        } catch {
+            fputs("Preview capture: \(error)\n", stderr)
+            exit(1)
+        }
+    }
+}
+
+enum PreviewError: Error { case capture }
+let arguments = CommandLine.arguments
+let root = URL(fileURLWithPath: arguments.count > 1 ? arguments[1] : FileManager.default.currentDirectoryPath, isDirectory: true)
+let preview = Preview(root: root)
+let app = NSApplication.shared
+app.setActivationPolicy(.regular)
+app.delegate = preview
+app.run()
