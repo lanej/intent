@@ -7,17 +7,16 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent
-REPO = ROOT.parent.parent
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--capture', type=Path, help='Render seven native variants as PNGs and exit')
+    parser.add_argument('--capture', type=Path, help='Render ten native variants as PNGs and exit')
     parser.add_argument('--build-only', action='store_true')
     args = parser.parse_args()
     if platform.system() != 'Darwin':
         parser.error('The preview requires macOS and Xcode Command Line Tools')
-    output = REPO / 'bin/mac-review-preview'
+    output = ROOT / '.build/mac-review-preview'
     output.parent.mkdir(exist_ok=True)
     subprocess.run(['xcrun', 'swiftc', '-swift-version', '5', str(ROOT / 'main.swift'),
                     '-target', f'{platform.machine()}-apple-macosx13.0',

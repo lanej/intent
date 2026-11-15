@@ -1,6 +1,6 @@
 # Structured Mac approval preview
 
-A standalone AppKit prototype for reviewing structured approval content with application branding. It is intentionally separate from Intent's public SDK, production helper and SSH transport. No credential is read, no command runs, and no approval or authentication is issued. Every screen carries a preview label.
+A standalone AppKit prototype for presenting structured approval content with application branding. The revised design separates preview settings from the approval, emphasizes the credential scope and expiry, and opens directly in a simulated authentication-waiting state. It remains separate from Intent's public SDK, production helper and SSH transport. No credential is read, no command runs, and no approval or authentication is issued. A fixed footer always identifies it as a preview.
 
 ## Run on a Mac
 
@@ -10,22 +10,29 @@ Requires macOS 13 or later and Xcode Command Line Tools. From the repository roo
 python3 experiments/mac-review/preview.py
 ```
 
-The script compiles `main.swift` into the ignored `bin/mac-review-preview` and opens a standalone review window. Select a normal credential request, a long request or a plaintext-file request. Change Keylease/example branding, light/dark appearance or larger text without changing the layout. Expand technical details to inspect the session and profile metadata. All data is synthetic.
+The script compiles `main.swift` into the ignored `.build/mac-review-preview` and opens the review. Use Preview options or Command-comma to open a separate settings window: choose a normal, long or plaintext-file request; Keylease or example branding; light/dark appearance; larger text; and simulated available authentication methods. Availability belongs to the local authenticator and is never supplied by a caller's request. These settings simulate it without probing hardware or starting authentication.
 
-Deny changes only the preview status. Continue opens a simulated authentication explanation with a Back to review button. It never invokes macOS authentication. Escape is assigned to Deny, Return to Continue and Command-Q exits. The window uses native scrolling and selectable request text. Keyboard navigation, focus, selection and the sheet still require verification in an unlocked graphical session; they have not been live-tested.
+## Authentication interaction
+
+The review is already waiting when it appears. There is no Authenticate button to start the flow. Show Touch ID only when usable, Apple Watch only when usable, and both when both are usable. The prototype's local settings provide all four combinations, including password only. Use Password remains visible in every case; Deny is always available during waiting.
+
+Use Password opens an inert explanation of the macOS password prompt. There is no password field in this prototype. Closing that explanation resumes the simulated waiting state. Deny ends that state and disables its actions until a different sample or settings selection starts a new simulated request. Escape is assigned to Deny, Return to Use Password, Command-comma to settings, and Command-Q to exit. Keyboard, scrolling, selection, VoiceOver, focus and sheet interaction remain unverified because live testing was deferred.
+
+The intended production interaction would begin OS policy evaluation once the immutable review is visible. Apple's [`deviceOwnerAuthentication`](https://developer.apple.com/documentation/localauthentication/lapolicy/deviceownerauthentication) policy supports Touch ID and Apple Watch in parallel, with user-password fallback. Password entry belongs to macOS. Actual capability detection, OS-owned authentication presentation and password-fallback handoff are future integration work; these exports demonstrate their intended presentation, not live hardware behavior. The production helper still uses its existing review-then-authenticate flow.
 
 ## Information architecture
 
 | Structured input | Human presentation |
 | --- | --- |
-| Application name, icon or SF Symbol, light/dark accents | Application identity; Intent remains visible as the presenter. Branding does not establish trust. |
-| Action title and summary | The decision in plain language, above the facts. |
-| Labeled facts and caller-supplied flags | Requested command, duration and profile, with explicit provenance. A requested command is a claim, not a command restriction. |
-| Credential names and environment mappings | What becomes accessible, without any credential values. The session-wide extraction consequence remains visible. |
-| Consequence | A prominent warning for plaintext-file output, including destination, readability and expiry behavior. |
-| Supporting facts | Expandable technical details for the session identifier, session label and profile digest. |
+| Application name, icon/SF Symbol, identity and action accents | Compact application identity with Intent as presenter. Branding does not establish trust. |
+| Action title and summary | The decision in plain language, above supporting facts. |
+| Typed access duration, expiry, profile and provider | A small two-column scope row, instead of a large metadata panel. |
+| Credential names and environment mappings | What becomes accessible, without credential values. |
+| Requested-use facts and caller-supplied flags | A subordinate command section with explicit provenance. The command is a claim, not a command restriction; any command in the session can extract the credentials. |
+| Consequence | A prominent plaintext-file warning, including destination, readability and expiry behavior. |
+| Supporting facts | Expandable connection details containing session metadata and the profile digest. |
 
-The fixtures in `fixtures/` are design inputs, not a proposed stable wire format. Alternate application branding is supplied by `example-brand.json`; typography, hierarchy, decision wording and layout remain owned by Intent. Colors distinguish identity and consequential effects, rather than encoding trust. The Keylease icon is copied from `lanej/keylease`'s `assets/icon/png/keylease-128.png`; its mint/teal accents follow that project's `assets/icon/design.json`. Harbor is a fictitious application used to demonstrate customization.
+The JSON files are prototype inputs, not a stable wire format. `example-brand.json` changes the identity and palette while keeping layout, hierarchy and interaction consistent. Keylease's icon is copied from `lanej/keylease`'s `assets/icon/png/keylease-128.png`; colors follow its `assets/icon/design.json`. Harbor is fictitious. Authentication capabilities are local simulated state, deliberately excluded from these request fixtures.
 
 ## Render evidence
 
@@ -33,16 +40,29 @@ The fixtures in `fixtures/` are design inputs, not a proposed stable wire format
 python3 experiments/mac-review/preview.py --capture /tmp/intent-review-captures
 ```
 
-This renders seven AppKit content-view PNGs and exits. These are native view exports, not desktop screenshots; they exclude window chrome. Six captures fit the document to inspect long content; `bounded-large.png` instead uses the minimum 620×650 content viewport to show overflow and the fixed footer. The interactive window instead has a bounded viewport with scrolling and persistent footer controls. The prototype draws its controls explicitly through AppKit because PDF export of modern composited controls omitted them while the Mac was locked; native `NSButton`/`NSPopUpButton` still own actions, menus and accessibility. These exports do not establish live keyboard, VoiceOver or authentication behavior.
+This renders ten native AppKit content-view bitmaps and exits. These are view exports, not desktop screenshots; window chrome and the separate settings window are excluded. Pixel density follows the rendering environment. Direct bitmap rendering preserves scroll clipping, avoiding the footer bleed observed with PDF exports. Custom AppKit drawing keeps prototype controls visible in exports; `NSButton` and `NSPopUpButton` retain native action, menu and accessibility behavior, which still needs live verification.
+
+Normal captures use a 560×640 content viewport. The long-content export fits its document for inspection; `bounded-large.png` instead uses 520×580 and intentionally shows overflow with a fixed footer and scroll hint. Settings and approval remain separate; the fixed preview cue and method/password controls stay visible when the request scrolls.
 
 | Variant | Artifact |
 | --- | --- |
-| Keylease, light | [View](screenshots/keylease-light.png) |
-| Keylease, dark | [View](screenshots/keylease-dark.png) |
+| Both methods, light | [View](screenshots/keylease-light.png) |
+| Both methods, dark | [View](screenshots/keylease-dark.png) |
+| Touch ID only | [View](screenshots/touch-id-only.png) |
+| Apple Watch only | [View](screenshots/watch-only.png) |
+| Password only | [View](screenshots/password-only.png) |
 | Plaintext-file consequence | [View](screenshots/plaintext-light.png) |
-| Technical details expanded | [View](screenshots/details-dark.png) |
+| Connection details expanded | [View](screenshots/details-dark.png) |
 | Long request with larger text | [View](screenshots/long-large.png) |
 | Alternate application branding | [View](screenshots/application-brand.png) |
 | Minimum viewport with long request and larger text | [View](screenshots/bounded-large.png) |
 
-The seven exports were inspected for hierarchy, contrast, wrapping and clipping. The Swift build and repository `make check` passed; native interaction remains unverified because the Mac was locked and live testing was deferred. The images establish appearance, not acceptance of the design. Review this prototype before deciding the production SDK schema or integration.
+The exports were inspected for hierarchy, contrast, wrapping, viewport clipping and method visibility. Swift compilation, the repository `make check`, and independent review passed. These establish rendering and implementation evidence, not native authentication or approval of the design.
+
+### Compare with the first prototype
+
+The first version placed settings above the approval and required an extra Authenticate click. Its original render is preserved below; the revised view starts in the simulated waiting state, puts settings in a separate window and keeps password fallback visible.
+
+| First prototype · 680×730 | Revised waiting state · 560×640 |
+| --- | --- |
+| ![First prototype](screenshots/v1/keylease-light.png) | ![Revised prototype](screenshots/keylease-light.png) |

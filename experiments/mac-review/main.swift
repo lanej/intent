@@ -6,6 +6,7 @@ struct Brand: Decodable {
     let name: String
     let accent: String
     let accentDark: String?
+    let actionAccent: String?
     let symbol: String
     let icon: String?
 }
@@ -22,14 +23,45 @@ struct Consequence: Decodable {
     let title: String
     let description: String
 }
+struct Access: Decodable {
+    let duration: String
+    let expires: String
+    let profile: String
+    let provider: String
+}
 struct Card: Decodable {
     var brand: Brand
     let title: String
     let summary: String
+    let access: Access
     let facts: [Fact]
     let credentials: [Credential]
     let consequence: Consequence?
     let details: [Fact]
+}
+
+// Device capabilities belong to the local authenticator, never the request.
+// This isolated prototype simulates those capabilities through local settings.
+enum SimulatedMethods: Int, CaseIterable {
+    case both, touchID, watch, passwordOnly
+    var title: String {
+        switch self {
+        case .both: return "Touch ID + Apple Watch"
+        case .touchID: return "Touch ID only"
+        case .watch: return "Apple Watch only"
+        case .passwordOnly: return "Password only"
+        }
+    }
+    var touchAvailable: Bool { self == .both || self == .touchID }
+    var watchAvailable: Bool { self == .both || self == .watch }
+    var instruction: String {
+        switch self {
+        case .both: return "Touch the sensor or double-click your Apple Watch."
+        case .touchID: return "Touch the sensor to approve."
+        case .watch: return "Double-click your Apple Watch to approve."
+        case .passwordOnly: return "Use your Mac password to approve."
+        }
+    }
 }
 
 func color(_ hex: String) -> NSColor {
@@ -43,18 +75,20 @@ func color(_ hex: String) -> NSColor {
 // exports even when a locked graphical session cannot composite glass controls.
 // NSButton/NSPopUpButton still own hit testing, menus, actions and accessibility.
 final class PreviewButton: NSButton {
+    var primaryFill: NSColor?
+    var primaryText: NSColor?
     override func draw(_ dirtyRect: NSRect) {
         let primary = keyEquivalent == "\r"
         if bezelStyle != .inline {
-            (isHighlighted ? NSColor.selectedControlColor : (primary ? NSColor.controlAccentColor : NSColor.controlBackgroundColor)).setFill()
+            (isHighlighted ? NSColor.selectedControlColor : (primary ? (primaryFill ?? NSColor.controlAccentColor) : NSColor.controlBackgroundColor)).setFill()
             NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 7, yRadius: 7).fill()
             NSColor.separatorColor.setStroke()
             NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 7, yRadius: 7).stroke()
         }
-        let text = (bezelStyle == .inline ? (title.hasPrefix("Hide") ? "⌄  " : "›  ") : "") + title
+        let text = (bezelStyle == .inline && title.contains("details") ? (title.hasPrefix("Hide") ? "⌄  " : "›  ") : "") + title
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font ?? NSFont.systemFont(ofSize: 13),
-            .foregroundColor: primary ? NSColor.white : NSColor.labelColor
+            .foregroundColor: !isEnabled ? NSColor.disabledControlTextColor : (primary ? (primaryText ?? NSColor.white) : NSColor.labelColor)
         ]
         let size = (text as NSString).size(withAttributes: attributes)
         (text as NSString).draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2), withAttributes: attributes)
@@ -97,7 +131,7 @@ final class PreviewCheckbox: NSButton {
 final class FlippedDocument: NSView { override var isFlipped: Bool { true } }
 final class Surface: NSView {
     let fill: NSColor
-    init(fill: NSColor) { self.fill = fill; super.init(frame: .zero) }
+    init(fill: NSColor) { self.fill = fill; super.init(frame: .zero); clipsToBounds = true }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
     override func draw(_ dirtyRect: NSRect) {
         fill.setFill()
@@ -107,12 +141,16 @@ final class Surface: NSView {
 
 final class Preview: NSObject, NSApplicationDelegate {
     let root: URL
-    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 760),
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 640),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
                           backing: .buffered, defer: false)
+    let settings = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 430, height: 275),
+                            styleMask: [.titled, .closable], backing: .buffered, defer: false)
     let cases = PreviewPopup()
     let appearance = PreviewPopup()
     let branding = PreviewPopup()
+    let methods = PreviewPopup()
+    var simulatedMethods: SimulatedMethods { SimulatedMethods(rawValue: methods.indexOfSelectedItem) ?? .passwordOnly }
     let larger = PreviewCheckbox(title: "Larger text", target: nil, action: nil)
     let status = NSTextField(labelWithString: "")
     var resultMessage = ""
@@ -127,7 +165,8 @@ final class Preview: NSObject, NSApplicationDelegate {
         cases.addItems(withTitles: ["Credential access", "Long request", "Plaintext file"])
         appearance.addItems(withTitles: ["Light", "Dark"])
         branding.addItems(withTitles: ["Keylease", "Example app"])
-        for popup in [cases, appearance, branding] {
+        methods.addItems(withTitles: SimulatedMethods.allCases.map { $0.title })
+        for popup in [cases, appearance, branding, methods] {
             popup.target = self
             popup.action = #selector(change)
         }
@@ -135,9 +174,26 @@ final class Preview: NSObject, NSApplicationDelegate {
         larger.target = self
         larger.action = #selector(change)
         window.title = "Intent · Approval preview"
-        window.minSize = NSSize(width: 620, height: 650)
+        window.minSize = NSSize(width: 520, height: 580)
         window.isReleasedWhenClosed = false
         window.center()
+        settings.title = "Preview options"
+        settings.isReleasedWhenClosed = false
+        settings.center()
+        cases.setAccessibilityLabel("Sample request")
+        appearance.setAccessibilityLabel("Appearance")
+        branding.setAccessibilityLabel("Application branding")
+        methods.setAccessibilityLabel("Simulated authentication methods")
+        let options = stack([], spacing: 14)
+        for (title, popup) in [("Sample", cases), ("Application", branding), ("Appearance", appearance), ("Methods", methods)] {
+            let heading = label(title)
+            heading.widthAnchor.constraint(equalToConstant: 100).isActive = true
+            fullWidth(stack([heading, popup], spacing: 12, horizontal: true), in: options)
+        }
+        options.addArrangedSubview(larger)
+        let surface = NSView()
+        settings.contentView = surface
+        pin(options, in: surface, inset: 24)
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -145,6 +201,7 @@ final class Preview: NSObject, NSApplicationDelegate {
         let item = NSMenuItem()
         menu.addItem(item)
         let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "Preview options…", action: #selector(showOptions), keyEquivalent: ",").target = self
         appMenu.addItem(withTitle: "Quit Preview", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         item.submenu = appMenu
         NSApp.mainMenu = menu
@@ -201,7 +258,7 @@ final class Preview: NSObject, NSApplicationDelegate {
     }
 
     func panel(_ content: NSView, tint: NSColor? = nil) -> NSView {
-        let box = Surface(fill: tint?.withAlphaComponent(0.08) ?? NSColor.quaternaryLabelColor.withAlphaComponent(0.12))
+        let box = Surface(fill: tint?.withAlphaComponent(0.08) ?? (appearance.indexOfSelectedItem == 1 ? color("282C2C") : color("F3F5F4")))
         pin(content, in: box, inset: 14)
         return box
     }
@@ -218,7 +275,7 @@ final class Preview: NSObject, NSApplicationDelegate {
             let claim = label("Caller supplied", size: 10, secondary: true)
             title = stack([heading, claim], spacing: 8, horizontal: true)
         } else { title = heading }
-        return stack([title, label(item.value, size: 13, mono: item.label == "Requested command")], spacing: 5)
+        return stack([title, label(item.value, size: item.label == "Profile SHA-256" ? 11 : 13, mono: item.label == "Profile SHA-256" || item.label == "Session identifier")], spacing: 5)
     }
 
     @objc func change() {
@@ -246,60 +303,57 @@ final class Preview: NSObject, NSApplicationDelegate {
     func render() {
         let content = Surface(fill: NSColor.windowBackgroundColor)
         window.contentView = content
-        let rootStack = stack([], spacing: 16)
+        let rootStack = stack([], spacing: 12)
         pin(rootStack, in: content, inset: 24)
-        fullWidth(stack([symbol("flask", tint: .secondaryLabelColor, size: 14),
-                         label("DESIGN PREVIEW · NO ACTIONS RUN", size: 10, weight: .semibold, secondary: true)], spacing: 6, horizontal: true), in: rootStack)
-        cases.setAccessibilityLabel("Sample request")
-        appearance.setAccessibilityLabel("Appearance")
-        branding.setAccessibilityLabel("Application branding")
-        let controls = stack([cases, branding, appearance, larger], spacing: 8, horizontal: true)
-        // Controls stay at system size while the approval itself scales.
-        for view in [cases, branding, appearance] { view.controlSize = .small }
-        larger.controlSize = .small
-        fullWidth(controls, in: rootStack)
-
         let scroll = NSScrollView()
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
         scroll.scrollerStyle = .legacy
+        scroll.clipsToBounds = true
+        scroll.contentView.clipsToBounds = true
         fullWidth(scroll, in: rootStack)
-        scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 300).isActive = true
+        scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 280).isActive = true
         let document = FlippedDocument()
         document.translatesAutoresizingMaskIntoConstraints = false
         scroll.documentView = document
         document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor).isActive = true
-        let body = stack([], spacing: 20)
+        let body = stack([], spacing: 16)
         pin(body, in: document, inset: 1)
 
-        let brandName = card.brand.name
         let icon = NSImageView()
-        if let path = card.brand.icon {
-            icon.image = NSImage(contentsOf: root.appendingPathComponent(path))
-        } else { icon.image = NSImage(systemSymbolName: card.brand.symbol, accessibilityDescription: nil) }
+        if let path = card.brand.icon { icon.image = NSImage(contentsOf: root.appendingPathComponent(path)) }
+        else { icon.image = NSImage(systemSymbolName: card.brand.symbol, accessibilityDescription: nil) }
         icon.contentTintColor = accent
         icon.imageScaling = .scaleProportionallyUpOrDown
         icon.translatesAutoresizingMaskIntoConstraints = false
-        icon.widthAnchor.constraint(equalToConstant: 44).isActive = true
-        icon.heightAnchor.constraint(equalToConstant: 44).isActive = true
+        icon.widthAnchor.constraint(equalToConstant: 32).isActive = true
+        icon.heightAnchor.constraint(equalToConstant: 32).isActive = true
         icon.setAccessibilityElement(false)
-        let identity = stack([icon, stack([label(brandName, size: 14, weight: .semibold),
-                                         label("Approval presented by Intent", size: 11, secondary: true)], spacing: 3)], spacing: 10, horizontal: true)
-        fullWidth(identity, in: body)
-        fullWidth(stack([label(card.title, size: 25, weight: .semibold), label(card.summary, size: 14, secondary: true)], spacing: 8), in: body)
+        let brand = stack([label(card.brand.name, size: 13, weight: .semibold),
+                           label("via Intent", size: 11, secondary: true)], spacing: 2)
+        let headerSpace = NSView()
+        headerSpace.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        fullWidth(stack([icon, brand, headerSpace], spacing: 9, horizontal: true), in: body)
+        fullWidth(stack([label(card.title, size: 23, weight: .semibold),
+                         label(card.summary, size: 13, secondary: true)], spacing: 6), in: body)
 
         if let consequence = card.consequence {
-            fullWidth(panel(stack([symbol("exclamationmark.triangle", tint: .systemOrange),
-                                   stack([label(consequence.title, size: 13, weight: .semibold),
-                                          label(consequence.description, size: 12)], spacing: 5)], spacing: 10, horizontal: true), tint: .systemOrange), in: body)
+            fullWidth(panel(stack([symbol("exclamationmark.triangle", tint: .systemOrange, size: 16),
+                                   stack([label(consequence.title, size: 12, weight: .semibold),
+                                          label(consequence.description, size: 12)], spacing: 4)], spacing: 9, horizontal: true), tint: .systemOrange), in: body)
         }
 
-        let facts = stack([], spacing: 16)
-        for item in card.facts { fullWidth(fact(item), in: facts) }
-        fullWidth(panel(facts), in: body)
+        let duration = stack([stack([symbol("clock", tint: accent, size: 14),
+                                      label(card.access.duration, size: 13, weight: .semibold)], spacing: 6, horizontal: true),
+                              label("Until " + card.access.expires, size: 11, secondary: true)], spacing: 4)
+        let profile = stack([label(card.access.profile, size: 13, weight: .medium),
+                             label(card.access.provider, size: 11, secondary: true)], spacing: 4)
+        let access = stack([duration, profile], spacing: 16, horizontal: true)
+        access.distribution = .fillEqually
+        fullWidth(access, in: body)
 
-        let credentials = stack([label("CREDENTIALS", size: 10, weight: .semibold, secondary: true)], spacing: 12)
+        let credentials = stack([label("Credentials", size: 12, weight: .semibold, secondary: true)], spacing: 12)
         for credential in card.credentials {
             let row = stack([symbol("key.horizontal", tint: accent, size: 16),
                              stack([label(credential.name, size: 13, weight: .medium),
@@ -307,13 +361,21 @@ final class Preview: NSObject, NSApplicationDelegate {
             fullWidth(row, in: credentials)
         }
         fullWidth(credentials, in: body)
-        fullWidth(label("Commands in this session may read these credentials.", size: 12, secondary: true), in: body)
 
-        let disclosure = PreviewButton(title: expanded ? "Hide technical details" : "Show technical details", target: self, action: #selector(toggleDetails))
+        for item in card.facts {
+            let heading = stack([label(item.label, size: 12, weight: .semibold),
+                                 label(item.callerSupplied ? "Caller supplied" : "", size: 10, secondary: true)], spacing: 8, horizontal: true)
+            let requested = stack([heading], spacing: 7)
+            fullWidth(panel(label(item.value, size: 12, mono: true)), in: requested)
+            fullWidth(requested, in: body)
+        }
+        fullWidth(label("Any command in this session can read these credentials.", size: 11, secondary: true), in: body)
+
+        let disclosure = PreviewButton(title: expanded ? "Hide connection details" : "Connection details", target: self, action: #selector(toggleDetails))
         disclosure.bezelStyle = .inline
         disclosure.image = NSImage(systemSymbolName: expanded ? "chevron.down" : "chevron.right", accessibilityDescription: nil)
         disclosure.imagePosition = .imageLeading
-        disclosure.setAccessibilityLabel(expanded ? "Hide technical details" : "Show technical details")
+        disclosure.setAccessibilityLabel(expanded ? "Hide connection details" : "Show connection details")
         body.addArrangedSubview(disclosure)
         if expanded {
             let details = stack([], spacing: 12)
@@ -324,85 +386,104 @@ final class Preview: NSObject, NSApplicationDelegate {
         let separator = NSBox()
         separator.boxType = .separator
         fullWidth(separator, in: rootStack)
+        let available = stack([], spacing: 18, horizontal: true)
+        if resultMessage.isEmpty && simulatedMethods.touchAvailable {
+            available.addArrangedSubview(stack([symbol("touchid", tint: accent, size: 22),
+                                                label("Touch ID", size: 13, weight: .medium)], spacing: 7, horizontal: true))
+        }
+        if resultMessage.isEmpty && simulatedMethods.watchAvailable {
+            available.addArrangedSubview(stack([symbol("applewatch", tint: accent, size: 22),
+                                                label("Apple Watch", size: 13, weight: .medium)], spacing: 7, horizontal: true))
+        }
+        if resultMessage.isEmpty && simulatedMethods == .passwordOnly {
+            available.addArrangedSubview(stack([symbol("lock", tint: accent, size: 22),
+                                                label("Mac password", size: 13, weight: .medium)], spacing: 7, horizontal: true))
+        }
+        if resultMessage.isEmpty {
+            fullWidth(stack([available, label(simulatedMethods.instruction, size: 11, secondary: true)], spacing: 5), in: rootStack)
+        }
         status.font = .systemFont(ofSize: 11)
         status.textColor = .secondaryLabelColor
         status.setAccessibilityLabel("Preview result")
+        status.isHidden = resultMessage.isEmpty
         fullWidth(status, in: rootStack)
+        let options = PreviewButton(title: "Preview options", target: self, action: #selector(showOptions))
+        options.bezelStyle = .inline
+        options.font = .systemFont(ofSize: 11)
         let deny = PreviewButton(title: "Deny", target: self, action: #selector(denyPreview))
         deny.bezelStyle = .rounded
         deny.keyEquivalent = "\u{1b}"
-        let next = PreviewButton(title: "Continue to authentication…", target: self, action: #selector(continuePreview))
+        deny.isEnabled = resultMessage.isEmpty
+        deny.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        deny.widthAnchor.constraint(greaterThanOrEqualToConstant: 72).isActive = true
+        let next = PreviewButton(title: "Use Password…", target: self, action: #selector(passwordPreview))
         next.bezelStyle = .rounded
         next.keyEquivalent = "\r"
+        next.isEnabled = resultMessage.isEmpty
+        next.primaryFill = appearance.indexOfSelectedItem == 1 ? accent : color(card.brand.actionAccent ?? card.brand.accent)
+        next.primaryText = appearance.indexOfSelectedItem == 1 ? color("0B171D") : .white
+        next.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        next.widthAnchor.constraint(greaterThanOrEqualToConstant: 110).isActive = true
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let footer = stack([spacer, deny, next], spacing: 10, horizontal: true)
-        fullWidth(footer, in: rootStack)
+        let previewTools = stack([label("Preview only · no actions run", size: 10, secondary: true), options], spacing: 1)
+        fullWidth(stack([previewTools, spacer, deny, next], spacing: 8, horizontal: true), in: rootStack)
         window.initialFirstResponder = deny
         window.contentView?.layoutSubtreeIfNeeded()
         status.stringValue = resultMessage.isEmpty && document.frame.height > scroll.contentView.bounds.height
             ? "Scroll to review the full request." : resultMessage
+        status.isHidden = status.stringValue.isEmpty
     }
 
+    @objc func showOptions() { settings.makeKeyAndOrderFront(nil) }
+
     @objc func toggleDetails() { expanded.toggle(); reload() }
-    @objc func denyPreview() { resultMessage = "Preview: denied. No approval was issued."; status.stringValue = resultMessage }
-    @objc func continuePreview() {
+    @objc func denyPreview() { resultMessage = "Preview: denied. No approval was issued."; reload() }
+    @objc func passwordPreview() {
         let sheet = NSAlert()
-        sheet.messageText = "Authentication preview"
-        sheet.informativeText = "A production request would now ask macOS to authenticate you. This preview does not invoke authentication or issue an approval."
+        sheet.messageText = "Mac password · preview"
+        sheet.informativeText = "Your Mac password belongs in the macOS authentication prompt. This preview does not open that prompt, collect a password, or issue an approval."
         sheet.addButton(withTitle: "Back to review")
         sheet.beginSheetModal(for: window) { _ in
-            self.resultMessage = "Preview completed. No approval was issued."
-            self.status.stringValue = self.resultMessage
+            self.resultMessage = ""
+            self.reload()
         }
     }
 
     func captureVariants(_ directory: URL) {
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            for (name, sample, dark, large, details, brand) in [
-                ("keylease-light", 0, false, false, false, 0),
-                ("keylease-dark", 0, true, false, false, 0),
-                ("plaintext-light", 2, false, false, false, 0),
-                ("details-dark", 0, true, false, true, 0),
-                ("long-large", 1, false, true, true, 0),
-                ("application-brand", 0, false, false, false, 1),
-                ("bounded-large", 1, false, true, true, 0)
+            for (name, sample, dark, large, details, brand, method) in [
+                ("keylease-light", 0, false, false, false, 0, 0),
+                ("keylease-dark", 0, true, false, false, 0, 0),
+                ("plaintext-light", 2, false, false, false, 0, 0),
+                ("details-dark", 0, true, false, true, 0, 0),
+                ("long-large", 1, false, true, true, 0, 0),
+                ("application-brand", 0, false, false, false, 1, 0),
+                ("bounded-large", 1, false, true, true, 0, 0),
+                ("touch-id-only", 0, false, false, false, 0, 1),
+                ("watch-only", 0, false, false, false, 0, 2),
+                ("password-only", 0, false, false, false, 0, 3)
             ] {
                 cases.selectItem(at: sample)
                 appearance.selectItem(at: dark ? 1 : 0)
                 branding.selectItem(at: brand)
+                methods.selectItem(at: method)
                 larger.state = large ? .on : .off
                 expanded = details
                 // Fit the full document for review artifacts; the interactive
                 // window retains its bounded viewport and native scrolling.
-                window.setContentSize(NSSize(width: name == "bounded-large" ? 620 : 680, height: name == "bounded-large" ? 650 : (large ? 1160 : (details ? 970 : (sample == 2 ? 860 : 730)))))
+                window.setContentSize(NSSize(width: name == "bounded-large" ? 520 : 560, height: name == "bounded-large" ? 580 : (large ? 1080 : (details ? 880 : (sample == 2 ? 730 : 640)))))
                 reload()
                 guard let view = window.contentView,
-                      let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(view.bounds.width * 2),
-                                                    pixelsHigh: Int(view.bounds.height * 2), bitsPerSample: 8,
-                                                    samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-                                                    colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
-                      let context = NSGraphicsContext(bitmapImageRep: bitmap) else { throw PreviewError.capture }
-                bitmap.size = view.bounds.size
-                var rendered: NSImage?
+                      let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { throw PreviewError.capture }
                 window.appearance?.performAsCurrentDrawingAppearance {
-                    rendered = NSImage(data: view.dataWithPDF(inside: view.bounds))
-                }
-                guard let rendered else { throw PreviewError.capture }
-                window.appearance?.performAsCurrentDrawingAppearance {
-                    NSGraphicsContext.saveGraphicsState()
-                    NSGraphicsContext.current = context
-                    context.cgContext.scaleBy(x: 2, y: 2)
-                    NSColor.windowBackgroundColor.setFill()
-                    view.bounds.fill()
-                    rendered.draw(in: view.bounds)
-                    NSGraphicsContext.restoreGraphicsState()
+                    view.cacheDisplay(in: view.bounds, to: bitmap)
                 }
                 guard let png = bitmap.representation(using: .png, properties: [:]) else { throw PreviewError.capture }
                 try png.write(to: directory.appendingPathComponent(name + ".png"))
             }
-            print("Captured seven native AppKit variants in \(directory.path)")
+            print("Captured ten native AppKit variants in \(directory.path)")
             NSApp.terminate(nil)
         } catch {
             fputs("Preview capture: \(error)\n", stderr)

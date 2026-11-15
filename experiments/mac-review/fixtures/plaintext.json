@@ -4,25 +4,16 @@
     "accent": "269D79",
     "symbol": "key.horizontal",
     "icon": "assets/keylease.png",
-    "accentDark": "7DEBC0"
+    "accentDark": "7DEBC0",
+    "actionAccent": "1D3534"
   },
   "title": "Write credentials to a file",
-  "summary": "Allow this session to render a local environment file for its commands.",
+  "summary": "Create an environment file for commands in this session.",
   "facts": [
     {
-      "label": "Requested command",
+      "label": "Requested use",
       "value": "./deploy --environment production",
       "callerSupplied": true
-    },
-    {
-      "label": "Access duration",
-      "value": "15 minutes \u00b7 expires at 10:30 AM",
-      "callerSupplied": false
-    },
-    {
-      "label": "Profile",
-      "value": "Production release \u00b7 1Password desktop",
-      "callerSupplied": false
     }
   ],
   "credentials": [
@@ -55,5 +46,11 @@
       "value": "2e8f933620a80692674d975f5b20cf4557ca967b36a137dd0d97d85f6b697b53",
       "callerSupplied": false
     }
-  ]
+  ],
+  "access": {
+    "duration": "15 minutes",
+    "expires": "10:30 AM",
+    "profile": "Production release",
+    "provider": "1Password desktop"
+  }
 }
