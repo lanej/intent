@@ -30,9 +30,33 @@ Inside that remote shell:
 intent request --reason 'Deploy revision abc123 to production' && ./deploy abc123
 ```
 
-The launcher owns a dedicated SSH connection and exposes a private one-time approval socket as `INTENT_APPROVAL_SOCKET`. It forwards no credential endpoints and leaves your SSH authentication agent alone. With [dotfiles](https://github.com/lanej/dotfiles), `make intent-ssh` enables the same mechanism for ordinary `ssh` sessions and direct commands; `make intent-ssh-remove` disables the managed setup. Automatic setup requires OpenSSH 10.3+ on the Mac.
+The legacy production launcher exposes a private one-time approval socket as `INTENT_APPROVAL_SOCKET` and uses SSH multiplexing. It forwards no credential endpoints and leaves your authentication agent alone. The [stable remote socket proof](experiments/stable-socket/README.md) explores dedicated connections without multiplexing; production integration is pending. [Dotfiles](https://github.com/lanej/dotfiles) installs Intent and Keylease independently. Its `make intent-ssh` target currently rejects activation, while `make intent-ssh-remove` retires the old managed hook.
 
 `intent request` writes JSON with `request_id` and `decision`. Exit codes are approved **0**, denied **2**, cancelled **3**, timed out **4**, unavailable **5**, and busy **6**. Operational or caller-context errors use **1**. `--timeout 30s` shortens the maximum two-minute request lifetime. An expired caller can return a context error before receiving a timeout decision; neither permits proceeding.
+
+## Agent identity
+
+Agent applications supply a type and opaque instance/session ID as caller context. This identifies the requesting agent for human review; it does not authenticate that agent or authorize its action. The agent ID is distinct from the fresh approval request ID and the SSH transport session.
+
+The CLI resolves identity in this order:
+
+1. `--agent-type TYPE --agent-id ID` replaces the whole identity.
+2. `INTENT_AGENT_TYPE` and `INTENT_AGENT_ID` supply an explicit environment pair for any agent family.
+3. `CODEX_THREAD_ID`, or `CODEX_SESSION_ID` when the thread variable is absent or empty, infers type `codex`.
+4. Without any of these, identity remains unspecified.
+
+Partial explicit pairs and invalid values are errors; fields are never combined across sources. Environment inference is a caller claim, not proof of process identity. For example:
+
+```sh
+intent request --reason 'Publish build abc123' --agent-type codex --agent-id thread-123
+INTENT_AGENT_TYPE=custom-agent INTENT_AGENT_ID=session-456 intent request --reason 'Publish build abc123'
+```
+
+SSH does not automatically forward agent environment variables. An agent running remotely can inherit its own context; an invocation sent from another host should supply the flags explicitly.
+
+The Go library never infers agent identity from environment variables. Set `Request.Agent` for a remote request or `Review.Agent` for a local native review. Both fields are optional for non-agent callers. `AgentIdentity` requires both `Type` (1–64 UTF-8 bytes) and `ID` (1–256 bytes), without whitespace, control or formatting characters. Preserve the identity while the call is pending.
+
+Agent-bearing SSH requests require updated clients and Mac approval brokers. Older strict brokers reject the new field; the client never drops identity or retries to obtain approval. Requests without identity keep their existing wire shape. The existing native renderer displays type and ID as labeled caller-supplied summary fields; the experimental card renders them as structured fields.
 
 ## Go libraries
 
@@ -43,7 +67,10 @@ client, err := intent.ClientFromEnv()
 if err != nil {
     return err
 }
-result, err := client.Approve(ctx, intent.Request{Reason: "Publish build abc123"})
+result, err := client.Approve(ctx, intent.Request{
+    Reason: "Publish build abc123",
+    Agent: &intent.AgentIdentity{Type: "codex", ID: "thread-123"},
+})
 if err != nil {
     return err
 }
@@ -53,7 +80,7 @@ if result.Decision != intent.Approved {
 return publish(ctx, "abc123")
 ```
 
-`ClientFromEnv` snapshots an explicit `INTENT_APPROVAL_SOCKET` first; otherwise it discovers an owned receipt for sshd's `SSH_CONNECTION`. It waits under the caller's context for up to ten seconds for setup. Use `intent.NewClient(socketPath)` for custom forwarding. Clients are safe for concurrent use; every request has a new connection and identity. Reasons must be nonempty UTF-8, at most 4096 bytes, without control or formatting characters except tabs and newlines.
+`ClientFromEnv` snapshots an explicit `INTENT_APPROVAL_SOCKET` first; otherwise it discovers an owned receipt for sshd's `SSH_CONNECTION`. It waits under the caller's context for up to ten seconds for setup. Use `intent.NewClient(socketPath)` for custom forwarding. Clients are safe for concurrent use; every request has a new connection and approval request ID. Reasons must be nonempty UTF-8, at most 4096 bytes, without control or formatting characters except tabs and newlines.
 
 Local Mac applications import `github.com/lanej/intent/native` and call it directly:
 
@@ -62,6 +89,7 @@ result, err := native.Review(ctx, intent.Review{
     Title:   "Authorize deployment",
     Summary: "Target: production\nRevision: abc123",
     Details: changeSummary,
+    Agent:   &intent.AgentIdentity{Type: "codex", ID: "thread-123"},
 })
 if err != nil {
     return err
@@ -78,7 +106,7 @@ The SDK manages a private helper process and its lifecycle without requiring an 
 
 Every approval requires explicit review and fresh OS authentication. Approvals are not cached or leased. One request can be pending per SSH broker; overlaps receive `Busy`. Cancellation, expiry, and transport loss cancel pending UI and prevent late success. Requests are never automatically retried after submission. `intent.ErrOutcomeUnknown` means no trustworthy decision was received; do not infer approval or automatically repeat the request.
 
-The automatic hook uses the existing SSH master's local connection metadata. Proxy transports may hide the destination; the review then reports it unavailable. Remote root and same-user processes can access the forwarded endpoint, and Intent cannot establish which remote process made a request. Same-user processes on the Mac are also outside its isolation boundary. Intent provides no signed receipts or privileged enforcement.
+The legacy hook uses its SSH master's local connection metadata. Proxy transports may hide the destination; the review then reports it unavailable. Remote root and same-user processes can access the forwarded endpoint, and Intent cannot establish which remote process made a request. Same-user processes on the Mac are also outside its isolation boundary. Intent provides no signed receipts or privileged enforcement.
 
 Helper bytes and signatures live in an owner-only content-addressed cache at `~/Library/Caches/dev.joshlane.intent`. The SDK checks ownership, permissions, and content before execution, and fails closed on unexpected or altered entries. Remove that cache while no reviews are running to recover from corruption; it is recreated from embedded assets. Review content, credentials, and decisions are never stored there.
 
@@ -92,13 +120,13 @@ The automatic broker stops with its SSH master without sustaining idle connectio
 
 A [stable remote socket design and executable proof](experiments/stable-socket/README.md) explores a separate non-multiplexed transport. It is not installed or enabled by the production CLI.
 
-A [structured Mac approval preview](experiments/mac-review/README.md) explores application branding and human presentation of structured requests. It is a standalone, inert prototype; no production approval interface changes.
+A [structured Mac approval preview](experiments/mac-review/README.md) explores application branding and human presentation of structured requests. It is a standalone, inert prototype. Agent metadata is supported separately by the SDK and request CLI; the visual prototype is not installed or enabled by production commands.
 
 Human authentication and rendered interaction remain unverified. To exercise them explicitly on your Mac, run `INTENT_NATIVE_ACCEPTANCE=1 go test -v ./native -run TestHumanAcceptance`: authenticate the first request and deny the second. Repeat for each available method; only the method actually exercised is verified.
 
 ## Migrate from Keylease
 
-Use `intent request` instead of `keylease approval request`, `intent ssh` instead of `keylease ssh`, `github.com/lanej/intent` instead of `github.com/lanej/keylease/approval`, and `INTENT_APPROVAL_SOCKET` instead of `KEYLEASE_APPROVAL_SOCKET`. No compatibility aliases are provided. Install Intent on both SSH endpoints, then run dotfiles `make intent-ssh` to replace its owned legacy configuration and reconnect. Existing sessions are not terminated. Keylease credential review uses this SDK directly and retains its credential policy.
+Use `intent request` instead of `keylease approval request`, `intent ssh` instead of `keylease ssh`, `github.com/lanej/intent` instead of `github.com/lanej/keylease/approval`, and `INTENT_APPROVAL_SOCKET` instead of `KEYLEASE_APPROVAL_SOCKET`. No compatibility aliases are provided. Install Intent on both SSH endpoints. Dotfiles automatic SSH activation awaits production stable-socket integration; `make intent-ssh-remove` retires its old managed configuration. Existing sessions are not terminated. Keylease credential review uses this SDK directly and retains its credential policy.
 
 ## License
 

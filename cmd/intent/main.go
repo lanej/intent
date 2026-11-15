@@ -29,7 +29,7 @@ func main() {
 
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" {
-		_, err := fmt.Println("Intent: explicit human approval over SSH\n\nintent request --reason TEXT [--timeout 2m]\nintent ssh HOST\nintent ssh-hook --control SOCKET\n\nA confirmed approval reports intent; callers own action enforcement.")
+		_, err := fmt.Println("Intent: explicit human approval over SSH\n\nintent request --reason TEXT [--timeout 2m] [--agent-type TYPE --agent-id ID]\nintent ssh HOST\nintent ssh-hook --control SOCKET\n\nA confirmed approval reports intent; callers own action enforcement.")
 		return err
 	}
 

@@ -16,12 +16,13 @@ import (
 )
 
 type Prompt struct {
-	Version int    `json:"version"`
-	Kind    string `json:"kind"`
-	ID      string `json:"request_id"`
-	Host    string `json:"host"`
-	Session string `json:"session"`
-	Reason  string `json:"reason"`
+	Version int                     `json:"version"`
+	Kind    string                  `json:"kind"`
+	ID      string                  `json:"request_id"`
+	Host    string                  `json:"host"`
+	Session string                  `json:"session"`
+	Reason  string                  `json:"reason"`
+	Agent   *approval.AgentIdentity `json:"agent,omitempty"`
 }
 
 // Authenticate is the isolation boundary for native UI and OS authentication.
@@ -90,7 +91,7 @@ func (s *Service) handle(parent context.Context, conn net.Conn) {
 		}
 	}
 
-	if request.Version != approvalwire.Version || !approvalwire.ValidID(request.ID) || !approvalwire.ValidReason(request.Reason) || request.TimeoutMS <= 0 {
+	if request.Version != approvalwire.Version || !approvalwire.ValidID(request.ID) || !approvalwire.ValidReason(request.Reason) || request.TimeoutMS <= 0 || !approvalwire.ValidAgent(request.Agent) {
 		response.Error = "invalid approval request or unsupported version"
 
 		reply()
@@ -137,9 +138,14 @@ func (s *Service) handle(parent context.Context, conn net.Conn) {
 	release := func() { released.Do(func() { s.mu.Lock(); s.active = false; s.mu.Unlock() }) }
 	defer release()
 
+	var agent *approval.AgentIdentity
+	if request.Agent != nil {
+		agent = &approval.AgentIdentity{Type: request.Agent.Type, ID: request.Agent.ID}
+	}
+
 	decision := approval.Unavailable
 	if s.Authenticate != nil && ctx.Err() == nil {
-		decision = s.Authenticate(ctx, Prompt{Version: 1, Kind: "one_time", ID: request.ID, Host: s.Host, Session: s.Session, Reason: request.Reason})
+		decision = s.Authenticate(ctx, Prompt{Version: 1, Kind: "one_time", ID: request.ID, Host: s.Host, Session: s.Session, Reason: request.Reason, Agent: agent})
 	}
 
 	if ctx.Err() != nil {
