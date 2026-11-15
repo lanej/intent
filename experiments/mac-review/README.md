@@ -1,6 +1,6 @@
 # Structured Mac approval preview
 
-A standalone AppKit prototype for presenting structured approval content with application branding. The title and subtitle share a header row with application identity. The revised design separates preview settings from the approval, emphasizes the credential scope and expiry, and opens directly in a simulated authentication-waiting state. It remains separate from Intent's public SDK, production helper and SSH transport. No credential is read, no command runs, and no approval or authentication is issued. A fixed footer always identifies it as a preview.
+A standalone AppKit prototype for presenting structured approval content with application branding. The title and subtitle share a header row with application identity. The revised design separates preview settings from the approval, emphasizes the credential scope and expiry, and opens directly in a simulated authentication-waiting state. It remains separate from Intent's public SDK, production helper and SSH transport. No credential is read, no command runs, and no approval or authentication is issued. A fixed cue above the review always identifies it as a preview; the bottom section contains only authentication methods, password fallback, denial and their result.
 
 ## Run on a Mac
 
@@ -10,7 +10,7 @@ Requires macOS 13 or later and Xcode Command Line Tools. From the repository roo
 python3 experiments/mac-review/preview.py
 ```
 
-The script compiles `main.swift` into the ignored `.build/mac-review-preview` and opens the review. Use Preview options or Command-comma to open a separate settings window: choose a normal, long or plaintext-file request; Keylease or example branding; light/dark appearance; larger text; and simulated available authentication methods. Availability belongs to the local authenticator and is never supplied by a caller's request. These settings simulate it without probing hardware or starting authentication.
+The script compiles `main.swift` into the ignored `.build/mac-review-preview` and opens the review. Use Preview options in the application menu or Command-comma to open a separate settings window: choose a normal, long or plaintext-file request; Keylease or example branding; light/dark appearance; larger text; and simulated available authentication methods. Availability belongs to the local authenticator and is never supplied by a caller's request. These settings simulate it without probing hardware or starting authentication.
 
 ## Authentication interaction
 
@@ -25,15 +25,15 @@ The intended production interaction would begin OS policy evaluation once the im
 | Structured input | Human presentation |
 | --- | --- |
 | Application name, icon/SF Symbol, identity and action accents | Compact application identity with Intent as presenter. Branding does not establish trust. |
-| Action title and summary | The decision alongside the application identity, above supporting facts. |
-| Optional agent type and ID | A labeled caller-supplied requester row. The opaque ID remains selectable and wraps without truncation. |
-| Typed access duration, expiry, profile and provider | A small two-column scope row, instead of a large metadata panel. |
+| Action title and summary | The decision alongside the application identity, with matching title and subtitle sizes, spacing and top alignment. |
+| Optional agent type and ID | A labeled caller-supplied requester row with an agent icon. The opaque ID remains selectable and wraps without truncation. |
+| Typed access duration, expiry, profile and provider | Three labeled columns: Access duration, Credential profile and Provider. A profile names the credential collection; the provider identifies the app supplying it. |
 | Credential names and environment mappings | What becomes accessible, without credential values. |
 | Requested-use facts and caller-supplied flags | A subordinate command section with explicit provenance. The command is a claim, not a command restriction; any command in the session can extract the credentials. |
 | Consequence | A prominent plaintext-file warning, including destination, readability and expiry behavior. |
 | Supporting facts | Expandable connection details containing session metadata and the profile digest. |
 
-The JSON files are prototype inputs, not a stable wire format. The root SDK and CLI now support agent identity separately; see [agent identity](../../README.md#agent-identity) for explicit library input, CLI inference and broker compatibility. `example-brand.json` changes the identity and palette while keeping layout, hierarchy and interaction consistent. Keylease's icon is copied from `lanej/keylease`'s `assets/icon/png/keylease-128.png`; colors follow its `assets/icon/design.json`. Harbor is fictitious. Authentication capabilities are local simulated state, deliberately excluded from these request fixtures.
+The JSON files are prototype inputs, not a stable wire format. The root SDK and CLI now support agent identity separately; see [agent identity](../../README.md#agent-identity) for explicit library input, CLI inference and broker compatibility. `example-brand.json` changes the identity and palette while keeping layout, hierarchy and interaction consistent. Keylease's icon is copied from `lanej/keylease`'s `assets/icon/png/keylease-128.png`; colors follow its `assets/icon/design.json`. Codex and 1Password artwork is copied from their installed macOS application bundles. Harbor is fictitious. Prototype agent inputs accept an optional display `name`, an `icon` path to a bundled PNG or ICNS under `assets/`, and a fallback SF `symbol`; providers accept the same icon and symbol choices. Missing artwork falls back to a symbol. Known Codex agents use the bundled Codex icon by default. These artwork fields are preview-only; the public SDK agent identity remains type and ID. Authentication capabilities are local simulated state, deliberately excluded from these request fixtures.
 
 ## Render evidence
 

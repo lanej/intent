@@ -51,7 +51,12 @@
     "duration": "15 minutes",
     "expires": "10:30 AM",
     "profile": "Production release",
-    "provider": "1Password desktop"
+    "provider": {
+      "name": "1Password",
+      "detail": "Desktop app",
+      "icon": "assets/1password.icns",
+      "symbol": "lock.shield"
+    }
   },
   "agent": {
     "type": "codex",

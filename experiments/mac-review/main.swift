@@ -23,15 +23,24 @@ struct Consequence: Decodable {
     let title: String
     let description: String
 }
+struct Provider: Decodable {
+    let name: String
+    let detail: String
+    let icon: String?
+    let symbol: String?
+}
 struct Access: Decodable {
     let duration: String
     let expires: String
     let profile: String
-    let provider: String
+    let provider: Provider
 }
 struct Agent: Decodable {
     let type: String
     let id: String
+    let name: String?
+    let icon: String?
+    let symbol: String?
 }
 struct Card: Decodable {
     var brand: Brand
@@ -262,6 +271,28 @@ final class Preview: NSObject, NSApplicationDelegate {
         return view
     }
 
+    // Supplied artwork is bundled with this local preview. It cannot fetch URLs
+    // or read an arbitrary file outside assets, including through a symlink.
+    func artwork(_ reference: String?, fallback: String, size: CGFloat) -> NSImageView {
+        var image: NSImage?
+        if let reference {
+            let assets = root.appendingPathComponent("assets", isDirectory: true).resolvingSymlinksInPath().standardizedFileURL
+            let file = root.appendingPathComponent(reference).resolvingSymlinksInPath().standardizedFileURL
+            if file.path.hasPrefix(assets.path + "/"), ["png", "icns"].contains(file.pathExtension.lowercased()) {
+                image = NSImage(contentsOf: file)
+            }
+        }
+        if image == nil { image = NSImage(systemSymbolName: fallback, accessibilityDescription: nil) }
+        let view = NSImageView(image: image ?? NSImage())
+        view.imageScaling = .scaleProportionallyUpOrDown
+        if image?.isTemplate == true { view.contentTintColor = accent }
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.widthAnchor.constraint(equalToConstant: size).isActive = true
+        view.heightAnchor.constraint(equalToConstant: size).isActive = true
+        view.setAccessibilityElement(false)
+        return view
+    }
+
     func panel(_ content: NSView, tint: NSColor? = nil) -> NSView {
         let box = Surface(fill: tint?.withAlphaComponent(0.08) ?? (appearance.indexOfSelectedItem == 1 ? color("282C2C") : color("F3F5F4")))
         pin(content, in: box, inset: 14)
@@ -310,6 +341,7 @@ final class Preview: NSObject, NSApplicationDelegate {
         window.contentView = content
         let rootStack = stack([], spacing: 12)
         pin(rootStack, in: content, inset: 24)
+        fullWidth(label("Preview only · no approvals are issued", size: 10, secondary: true), in: rootStack)
         let scroll = NSScrollView()
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
@@ -335,12 +367,15 @@ final class Preview: NSObject, NSApplicationDelegate {
         icon.widthAnchor.constraint(equalToConstant: 32).isActive = true
         icon.heightAnchor.constraint(equalToConstant: 32).isActive = true
         icon.setAccessibilityElement(false)
-        let brand = stack([label(card.brand.name, size: 13, weight: .semibold),
-                           label("via Intent", size: 11, secondary: true)], spacing: 2)
+        let headerTitleSize: CGFloat = 13
+        let headerSubtitleSize: CGFloat = 11
+        let brand = stack([label(card.brand.name, size: headerTitleSize, weight: .semibold),
+                           label("via Intent", size: headerSubtitleSize, secondary: true)], spacing: 2)
         let identity = stack([icon, brand], spacing: 9, horizontal: true)
+        identity.alignment = .top
         identity.widthAnchor.constraint(equalToConstant: 116).isActive = true
-        let heading = stack([label(card.title, size: 23, weight: .semibold),
-                             label(card.summary, size: 13, secondary: true)], spacing: 6)
+        let heading = stack([label(card.title, size: headerTitleSize, weight: .semibold),
+                             label(card.summary, size: headerSubtitleSize, secondary: true)], spacing: 2)
         for view in heading.arrangedSubviews {
             view.widthAnchor.constraint(equalTo: heading.widthAnchor).isActive = true
         }
@@ -350,8 +385,11 @@ final class Preview: NSObject, NSApplicationDelegate {
         fullWidth(header, in: body)
 
         if let agent = card.agent {
+            let knownIcon = agent.type == "codex" ? "assets/codex.icns" : nil
+            let name = agent.name ?? (agent.type == "codex" ? "Codex" : agent.type)
             let family = stack([label("Agent · caller supplied", size: 10, secondary: true),
-                                label(agent.type, size: 13, weight: .medium)], spacing: 4)
+                                stack([artwork(agent.icon ?? knownIcon, fallback: agent.symbol ?? "terminal", size: 18),
+                                       label(name, size: 13, weight: .medium)], spacing: 6, horizontal: true)], spacing: 4)
             family.widthAnchor.constraint(equalToConstant: 150).isActive = true
             let instance = stack([label("Agent ID", size: 10, secondary: true),
                                   label(agent.id, size: 11, mono: true)], spacing: 4)
@@ -372,12 +410,19 @@ final class Preview: NSObject, NSApplicationDelegate {
                                           label(consequence.description, size: 12)], spacing: 4)], spacing: 9, horizontal: true), tint: .systemOrange), in: body)
         }
 
-        let duration = stack([stack([symbol("clock", tint: accent, size: 14),
-                                      label(card.access.duration, size: 13, weight: .semibold)], spacing: 6, horizontal: true),
+        let duration = stack([label("Access duration", size: 10, secondary: true),
+                              stack([symbol("clock", tint: accent, size: 14),
+                                     label(card.access.duration, size: 13, weight: .semibold)], spacing: 6, horizontal: true),
                               label("Until " + card.access.expires, size: 11, secondary: true)], spacing: 4)
-        let profile = stack([label(card.access.profile, size: 13, weight: .medium),
-                             label(card.access.provider, size: 11, secondary: true)], spacing: 4)
-        let access = stack([duration, profile], spacing: 16, horizontal: true)
+        let profile = stack([label("Credential profile", size: 10, secondary: true),
+                             stack([symbol("rectangle.stack", tint: .secondaryLabelColor, size: 14),
+                                    label(card.access.profile, size: 13, weight: .medium)], spacing: 6, horizontal: true)], spacing: 4)
+        let provider = stack([label("Provider", size: 10, secondary: true),
+                              stack([artwork(card.access.provider.icon, fallback: card.access.provider.symbol ?? "lock.shield", size: 22),
+                                     stack([label(card.access.provider.name, size: 13, weight: .medium),
+                                            label(card.access.provider.detail, size: 11, secondary: true)], spacing: 2)], spacing: 6, horizontal: true)], spacing: 4)
+        let access = stack([duration, profile, provider], spacing: 14, horizontal: true)
+        access.alignment = .top
         access.distribution = .fillEqually
         fullWidth(access, in: body)
 
@@ -411,6 +456,9 @@ final class Preview: NSObject, NSApplicationDelegate {
             fullWidth(panel(details), in: body)
         }
 
+        let scrollHint = label("", size: 11, secondary: true)
+        scrollHint.isHidden = true
+        fullWidth(scrollHint, in: rootStack)
         let separator = NSBox()
         separator.boxType = .separator
         fullWidth(separator, in: rootStack)
@@ -435,9 +483,6 @@ final class Preview: NSObject, NSApplicationDelegate {
         status.setAccessibilityLabel("Preview result")
         status.isHidden = resultMessage.isEmpty
         fullWidth(status, in: rootStack)
-        let options = PreviewButton(title: "Preview options", target: self, action: #selector(showOptions))
-        options.bezelStyle = .inline
-        options.font = .systemFont(ofSize: 11)
         let deny = PreviewButton(title: "Deny", target: self, action: #selector(denyPreview))
         deny.bezelStyle = .rounded
         deny.keyEquivalent = "\u{1b}"
@@ -454,13 +499,13 @@ final class Preview: NSObject, NSApplicationDelegate {
         next.widthAnchor.constraint(greaterThanOrEqualToConstant: 110).isActive = true
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let previewTools = stack([label("Preview only · no actions run", size: 10, secondary: true), options], spacing: 1)
-        fullWidth(stack([previewTools, spacer, deny, next], spacing: 8, horizontal: true), in: rootStack)
+        fullWidth(stack([spacer, deny, next], spacing: 8, horizontal: true), in: rootStack)
         window.initialFirstResponder = deny
         window.contentView?.layoutSubtreeIfNeeded()
-        status.stringValue = resultMessage.isEmpty && document.frame.height > scroll.contentView.bounds.height
-            ? "Scroll to review the full request." : resultMessage
+        status.stringValue = resultMessage
         status.isHidden = status.stringValue.isEmpty
+        scrollHint.stringValue = document.frame.height > scroll.contentView.bounds.height ? "Scroll to review the full request." : ""
+        scrollHint.isHidden = scrollHint.stringValue.isEmpty
     }
 
     @objc func showOptions() { settings.makeKeyAndOrderFront(nil) }
