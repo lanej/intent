@@ -52,5 +52,9 @@
     "expires": "10:30 AM",
     "profile": "Production release",
     "provider": "1Password desktop"
+  },
+  "agent": {
+    "type": "codex",
+    "id": "agent-session-demo-017"
   }
 }

@@ -29,8 +29,13 @@ struct Access: Decodable {
     let profile: String
     let provider: String
 }
+struct Agent: Decodable {
+    let type: String
+    let id: String
+}
 struct Card: Decodable {
     var brand: Brand
+    let agent: Agent?
     let title: String
     let summary: String
     let access: Access
@@ -332,11 +337,34 @@ final class Preview: NSObject, NSApplicationDelegate {
         icon.setAccessibilityElement(false)
         let brand = stack([label(card.brand.name, size: 13, weight: .semibold),
                            label("via Intent", size: 11, secondary: true)], spacing: 2)
-        let headerSpace = NSView()
-        headerSpace.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        fullWidth(stack([icon, brand, headerSpace], spacing: 9, horizontal: true), in: body)
-        fullWidth(stack([label(card.title, size: 23, weight: .semibold),
-                         label(card.summary, size: 13, secondary: true)], spacing: 6), in: body)
+        let identity = stack([icon, brand], spacing: 9, horizontal: true)
+        identity.widthAnchor.constraint(equalToConstant: 116).isActive = true
+        let heading = stack([label(card.title, size: 23, weight: .semibold),
+                             label(card.summary, size: 13, secondary: true)], spacing: 6)
+        for view in heading.arrangedSubviews {
+            view.widthAnchor.constraint(equalTo: heading.widthAnchor).isActive = true
+        }
+        let header = stack([identity, heading], spacing: 18, horizontal: true)
+        header.alignment = .top
+        heading.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        fullWidth(header, in: body)
+
+        if let agent = card.agent {
+            let family = stack([label("Agent · caller supplied", size: 10, secondary: true),
+                                label(agent.type, size: 13, weight: .medium)], spacing: 4)
+            family.widthAnchor.constraint(equalToConstant: 150).isActive = true
+            let instance = stack([label("Agent ID", size: 10, secondary: true),
+                                  label(agent.id, size: 11, mono: true)], spacing: 4)
+            for view in instance.arrangedSubviews {
+                view.widthAnchor.constraint(equalTo: instance.widthAnchor).isActive = true
+            }
+            instance.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            let requester = stack([family, instance], spacing: 16, horizontal: true)
+            requester.alignment = .top
+            fullWidth(requester, in: body)
+        } else {
+            fullWidth(label("Agent identity not supplied", size: 11, secondary: true), in: body)
+        }
 
         if let consequence = card.consequence {
             fullWidth(panel(stack([symbol("exclamationmark.triangle", tint: .systemOrange, size: 16),
