@@ -68,14 +68,6 @@ enum SimulatedMethods: Int, CaseIterable {
     }
     var touchAvailable: Bool { self == .both || self == .touchID }
     var watchAvailable: Bool { self == .both || self == .watch }
-    var instruction: String {
-        switch self {
-        case .both: return "Touch the sensor or double-click your Apple Watch."
-        case .touchID: return "Touch the sensor to approve."
-        case .watch: return "Double-click your Apple Watch to approve."
-        case .passwordOnly: return "Use your Mac password to approve."
-        }
-    }
 }
 
 func color(_ hex: String) -> NSColor {
@@ -91,6 +83,7 @@ func color(_ hex: String) -> NSColor {
 final class PreviewButton: NSButton {
     var primaryFill: NSColor?
     var primaryText: NSColor?
+    var actionSymbol: String?
     override func draw(_ dirtyRect: NSRect) {
         let primary = keyEquivalent == "\r"
         if bezelStyle != .inline {
@@ -105,7 +98,13 @@ final class PreviewButton: NSButton {
             .foregroundColor: !isEnabled ? NSColor.disabledControlTextColor : (primary ? (primaryText ?? NSColor.white) : NSColor.labelColor)
         ]
         let size = (text as NSString).size(withAttributes: attributes)
-        (text as NSString).draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2), withAttributes: attributes)
+        let textY = actionSymbol == nil ? (bounds.height - size.height) / 2 : (isFlipped ? bounds.height - 15 - size.height : 15)
+        (text as NSString).draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: textY), withAttributes: attributes)
+        if let actionSymbol, let icon = NSImage(systemSymbolName: actionSymbol, accessibilityDescription: nil) {
+            let tint = attributes[.foregroundColor] as? NSColor ?? .labelColor
+            let configured = icon.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [tint])) ?? icon
+            configured.draw(in: NSRect(x: (bounds.width - 26) / 2, y: isFlipped ? 15 : bounds.height - 41, width: 26, height: 26))
+        }
         if window?.firstResponder === self {
             NSColor.keyboardFocusIndicatorColor.setStroke()
             let ring = NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: 7, yRadius: 7)
@@ -264,6 +263,7 @@ final class Preview: NSObject, NSApplicationDelegate {
     func symbol(_ name: String, tint: NSColor, size: CGFloat = 18) -> NSImageView {
         let view = NSImageView(image: NSImage(systemSymbolName: name, accessibilityDescription: nil) ?? NSImage())
         view.contentTintColor = tint
+        view.imageScaling = .scaleProportionallyUpOrDown
         view.translatesAutoresizingMaskIntoConstraints = false
         view.widthAnchor.constraint(equalToConstant: size).isActive = true
         view.heightAnchor.constraint(equalToConstant: size).isActive = true
@@ -462,21 +462,29 @@ final class Preview: NSObject, NSApplicationDelegate {
         let separator = NSBox()
         separator.boxType = .separator
         fullWidth(separator, in: rootStack)
-        let available = stack([], spacing: 18, horizontal: true)
+        let actions = stack([], spacing: 8, horizontal: true)
+        actions.distribution = .fillEqually
+        func waitingMethod(_ title: String, _ glyph: String) -> NSView {
+            let content = stack([symbol(glyph, tint: accent, size: 26),
+                                 label(title, size: 13, weight: .medium)], spacing: 6)
+            content.alignment = .centerX
+            let view = NSView()
+            view.addSubview(content)
+            NSLayoutConstraint.activate([
+                view.heightAnchor.constraint(equalToConstant: 76),
+                content.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+                content.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+                content.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor)
+            ])
+            view.setAccessibilityElement(true)
+            view.setAccessibilityLabel("\(title), waiting for authentication")
+            return view
+        }
         if resultMessage.isEmpty && simulatedMethods.touchAvailable {
-            available.addArrangedSubview(stack([symbol("touchid", tint: accent, size: 22),
-                                                label("Touch ID", size: 13, weight: .medium)], spacing: 7, horizontal: true))
+            actions.addArrangedSubview(waitingMethod("Touch ID", "touchid"))
         }
         if resultMessage.isEmpty && simulatedMethods.watchAvailable {
-            available.addArrangedSubview(stack([symbol("applewatch", tint: accent, size: 22),
-                                                label("Apple Watch", size: 13, weight: .medium)], spacing: 7, horizontal: true))
-        }
-        if resultMessage.isEmpty && simulatedMethods == .passwordOnly {
-            available.addArrangedSubview(stack([symbol("lock", tint: accent, size: 22),
-                                                label("Mac password", size: 13, weight: .medium)], spacing: 7, horizontal: true))
-        }
-        if resultMessage.isEmpty {
-            fullWidth(stack([available, label(simulatedMethods.instruction, size: 11, secondary: true)], spacing: 5), in: rootStack)
+            actions.addArrangedSubview(waitingMethod("Apple Watch", "applewatch"))
         }
         status.font = .systemFont(ofSize: 11)
         status.textColor = .secondaryLabelColor
@@ -487,19 +495,23 @@ final class Preview: NSObject, NSApplicationDelegate {
         deny.bezelStyle = .rounded
         deny.keyEquivalent = "\u{1b}"
         deny.isEnabled = resultMessage.isEmpty
-        deny.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        deny.font = .systemFont(ofSize: 13 * scale, weight: .medium)
+        deny.actionSymbol = "xmark"
+        deny.heightAnchor.constraint(equalToConstant: 76).isActive = true
         deny.widthAnchor.constraint(greaterThanOrEqualToConstant: 72).isActive = true
-        let next = PreviewButton(title: "Use Password…", target: self, action: #selector(passwordPreview))
+        let next = PreviewButton(title: "Use Password", target: self, action: #selector(passwordPreview))
         next.bezelStyle = .rounded
         next.keyEquivalent = "\r"
         next.isEnabled = resultMessage.isEmpty
         next.primaryFill = appearance.indexOfSelectedItem == 1 ? accent : color(card.brand.actionAccent ?? card.brand.accent)
         next.primaryText = appearance.indexOfSelectedItem == 1 ? color("0B171D") : .white
-        next.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        next.font = .systemFont(ofSize: 13 * scale, weight: .medium)
+        next.actionSymbol = "lock"
+        next.heightAnchor.constraint(equalToConstant: 76).isActive = true
         next.widthAnchor.constraint(greaterThanOrEqualToConstant: 110).isActive = true
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        fullWidth(stack([spacer, deny, next], spacing: 8, horizontal: true), in: rootStack)
+        actions.addArrangedSubview(next)
+        actions.addArrangedSubview(deny)
+        fullWidth(actions, in: rootStack)
         window.initialFirstResponder = deny
         window.contentView?.layoutSubtreeIfNeeded()
         status.stringValue = resultMessage

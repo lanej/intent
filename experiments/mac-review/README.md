@@ -14,7 +14,7 @@ The script compiles `main.swift` into the ignored `.build/mac-review-preview` an
 
 ## Authentication interaction
 
-The review is already waiting when it appears. There is no Authenticate button to start the flow. Show Touch ID only when usable, Apple Watch only when usable, and both when both are usable. The prototype's local settings provide all four combinations, including password only. Use Password remains visible in every case; Deny is always available during waiting.
+The review is already waiting when it appears. There is no Authenticate button to start the flow. Show Touch ID only when usable, Apple Watch only when usable, and both when both are usable. The prototype's local settings provide all four combinations, including password only. Available methods, Use Password and Deny share one row with centered icons and matching label typography. Method icons are larger, password and denial have larger hit targets, and repeated authentication instructions are omitted. Waiting methods are indicators; password and denial are buttons. Use Password remains visible in every case; Deny is always available during waiting.
 
 Use Password opens an inert explanation of the macOS password prompt. There is no password field in this prototype. Closing that explanation resumes the simulated waiting state. Deny ends that state and disables its actions until a different sample or settings selection starts a new simulated request. Escape is assigned to Deny, Return to Use Password, Command-comma to settings, and Command-Q to exit. Keyboard, scrolling, selection, VoiceOver, focus and sheet interaction remain unverified because live testing was deferred.
 
