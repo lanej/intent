@@ -126,3 +126,16 @@ func TestAcceptedEscapeHeavyReviewFitsNativeFrame(t *testing.T) {
 		t.Fatalf("valid review rejected: %+v %v", result, err)
 	}
 }
+
+func TestAgentPresentationPreservesClaimsAndCallerInput(t *testing.T) {
+	original := approval.Review{Title: "Release", Summary: "SSH target: fixture", Details: "Deploy abc123", Agent: &approval.AgentIdentity{Type: "codex", ID: "thread-native-fixture"}}
+
+	projected := presentation(original)
+	if !strings.Contains(projected.Summary, "Agent type (caller supplied): codex") || !strings.Contains(projected.Summary, "Agent ID (caller supplied): thread-native-fixture") || !strings.Contains(projected.Summary, original.Summary) {
+		t.Fatalf("agent context missing: %+v", projected)
+	}
+
+	if original.Summary != "SSH target: fixture" || original.Agent == nil || projected.Title != original.Title || projected.Details != original.Details || projected.Agent != nil {
+		t.Fatal("presentation mutated input or leaked unsupported fields to the legacy renderer")
+	}
+}

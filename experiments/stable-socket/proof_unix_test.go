@@ -38,6 +38,12 @@ func TestMain(m *testing.M) {
 
 		authenticate := func(ctx context.Context, p local.Prompt) approval.Decision {
 			switch p.Reason {
+			case "proof approve agent":
+				if p.Agent == nil || p.Agent.Type != "codex" || p.Agent.ID != "thread-ssh-fixture" {
+					return approval.Denied
+				}
+
+				return approval.Approved
 			case "proof approve":
 				return approval.Approved
 			case "proof pending":
@@ -405,6 +411,12 @@ func TestNoControlMasterOpenSSH(t *testing.T) {
 	first, decoder := helper(t, args...)
 	registered(t, decoder)
 	expectDecision(t, socket, "proof approve", approval.Approved)
+
+	result, err := approval.NewClient(socket).Approve(t.Context(), approval.Request{Reason: "proof approve agent", Agent: &approval.AgentIdentity{Type: "codex", ID: "thread-ssh-fixture"}})
+	if err != nil || result.Decision != approval.Approved {
+		t.Fatalf("agent identity did not reach native callback through SSH: %+v %v", result, err)
+	}
+
 	expectDecision(t, socket, "proof deny", approval.Denied)
 
 	oldCtx, oldCancel := context.WithTimeout(t.Context(), 20*time.Second)

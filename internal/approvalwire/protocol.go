@@ -17,11 +17,17 @@ const (
 	MaxReason = 4 * 1024
 )
 
+type AgentIdentity struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+}
+
 type Request struct {
-	Version   int    `json:"version"`
-	ID        string `json:"request_id"`
-	Reason    string `json:"reason"`
-	TimeoutMS int64  `json:"timeout_ms"`
+	Version   int            `json:"version"`
+	ID        string         `json:"request_id"`
+	Reason    string         `json:"reason"`
+	TimeoutMS int64          `json:"timeout_ms"`
+	Agent     *AgentIdentity `json:"agent,omitempty"`
 }
 
 type Response struct {
@@ -29,6 +35,30 @@ type Response struct {
 	ID       string `json:"request_id"`
 	Decision string `json:"decision,omitempty"`
 	Error    string `json:"error,omitempty"`
+}
+
+func ValidAgent(agent *AgentIdentity) bool {
+	if agent == nil {
+		return true
+	}
+
+	if len(agent.Type) == 0 || len(agent.Type) > 64 || len(agent.ID) == 0 || len(agent.ID) > 256 {
+		return false
+	}
+
+	for _, value := range []string{agent.Type, agent.ID} {
+		if !utf8.ValidString(value) {
+			return false
+		}
+
+		for _, r := range value {
+			if unicode.IsSpace(r) || unicode.IsControl(r) || unicode.In(r, unicode.Cf) {
+				return false
+			}
+		}
+	}
+
+	return true
 }
 
 func ValidReason(reason string) bool {

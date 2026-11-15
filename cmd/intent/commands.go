@@ -50,6 +50,8 @@ func approvalCommand(ctx context.Context, args []string) error {
 	case "request":
 		f := flag.NewFlagSet("approval request", flag.ContinueOnError)
 		reason := f.String("reason", "", "action to review on the Mac")
+		agentType := f.String("agent-type", "", "caller-supplied agent family; requires --agent-id")
+		agentID := f.String("agent-id", "", "caller-supplied agent session/instance ID; requires --agent-type")
 
 		timeout := f.Duration("timeout", approval.DefaultTimeout, "request lifetime (maximum 2m)")
 		if err := f.Parse(args[1:]); err != nil {
@@ -60,6 +62,19 @@ func approvalCommand(ctx context.Context, args []string) error {
 			return errors.New("request requires --reason and a timeout between 0 and 2m")
 		}
 
+		explicitAgent := false
+
+		f.Visit(func(flag *flag.Flag) {
+			if flag.Name == "agent-type" || flag.Name == "agent-id" {
+				explicitAgent = true
+			}
+		})
+
+		agent, err := requestAgent(*agentType, *agentID, explicitAgent, os.Getenv)
+		if err != nil {
+			return err
+		}
+
 		client, err := approval.ClientFromEnv()
 		if err != nil {
 			return err
@@ -68,7 +83,7 @@ func approvalCommand(ctx context.Context, args []string) error {
 		requestCtx, cancel := context.WithTimeout(ctx, *timeout)
 		defer cancel()
 
-		result, err := client.Approve(requestCtx, approval.Request{Reason: *reason})
+		result, err := client.Approve(requestCtx, approval.Request{Reason: *reason, Agent: agent})
 		if err != nil {
 			return err
 		}

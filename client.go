@@ -26,7 +26,13 @@ const (
 )
 
 type (
-	Request  struct{ Reason string }
+	Request struct {
+		Reason string
+		// Agent is optional caller-supplied context. Supply it explicitly in agent
+		// applications; nil represents an unspecified caller. Never mutate it
+		// concurrently with Approve. Metadata requires an updated broker.
+		Agent *AgentIdentity
+	}
 	Decision string
 )
 
@@ -77,6 +83,17 @@ func (c *Client) Approve(ctx context.Context, request Request) (Result, error) {
 		return Result{}, errors.New("reason must be nonempty UTF-8, at most 4096 bytes, without control or formatting characters")
 	}
 
+	var agent *approvalwire.AgentIdentity
+
+	if request.Agent != nil {
+		snapshot := *request.Agent
+		if err := snapshot.Validate(); err != nil {
+			return Result{}, err
+		}
+
+		agent = snapshot.wire()
+	}
+
 	if c == nil || c.socketPath == "" && c.discoveryPath == "" {
 		return Result{}, errors.New("approval socket is required")
 	}
@@ -118,7 +135,7 @@ func (c *Client) Approve(ctx context.Context, request Request) (Result, error) {
 	}
 
 	id := hex.EncodeToString(nonce)
-	r := approvalwire.Request{Version: approvalwire.Version, ID: id, Reason: request.Reason, TimeoutMS: max(1, time.Until(deadline).Milliseconds())}
+	r := approvalwire.Request{Version: approvalwire.Version, ID: id, Reason: request.Reason, TimeoutMS: max(1, time.Until(deadline).Milliseconds()), Agent: agent}
 
 	var response approvalwire.Response
 

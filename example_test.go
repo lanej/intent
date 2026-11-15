@@ -21,7 +21,7 @@ func ExampleClient_Approve() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	result, err := client.Approve(ctx, approval.Request{Reason: "Deploy revision abc123 to production"})
+	result, err := client.Approve(ctx, approval.Request{Reason: "Deploy revision abc123 to production", Agent: &approval.AgentIdentity{Type: "codex", ID: "example-agent-session"}})
 	if err != nil {
 		if _, checkErr := fmt.Println(err); checkErr != nil {
 			return

@@ -54,6 +54,9 @@ func startService(t *testing.T, auth Authenticate) string {
 }
 
 func TestRoundTripAndCallerIsolation(t *testing.T) {
+	t.Setenv("INTENT_AGENT_TYPE", "ambient-agent")
+	t.Setenv("INTENT_AGENT_ID", "ambient-session")
+
 	var prompts []Prompt
 
 	path := startService(t, func(_ context.Context, p Prompt) approval.Decision {
@@ -62,7 +65,7 @@ func TestRoundTripAndCallerIsolation(t *testing.T) {
 	})
 	client := approval.NewClient(path)
 
-	a, err := client.Approve(context.Background(), approval.Request{Reason: "Deploy revision abc123"})
+	a, err := client.Approve(context.Background(), approval.Request{Reason: "Deploy revision abc123", Agent: &approval.AgentIdentity{Type: "codex", ID: "thread-service-fixture"}})
 	if err != nil || a.Decision != approval.Approved {
 		t.Fatalf("%+v %v", a, err)
 	}
@@ -72,7 +75,7 @@ func TestRoundTripAndCallerIsolation(t *testing.T) {
 		t.Fatalf("%+v %v", b, err)
 	}
 
-	if len(prompts) != 2 || prompts[0].Reason != "Deploy revision abc123" || prompts[0].Host != "configured-host" || prompts[0].Session != "local-session" || prompts[0].ID != a.RequestID {
+	if len(prompts) != 2 || prompts[0].Reason != "Deploy revision abc123" || prompts[0].Host != "configured-host" || prompts[0].Session != "local-session" || prompts[0].ID != a.RequestID || prompts[0].Agent == nil || prompts[0].Agent.Type != "codex" || prompts[0].Agent.ID != "thread-service-fixture" || prompts[1].Agent != nil {
 		t.Fatalf("prompts: %+v", prompts)
 	}
 }
@@ -169,6 +172,8 @@ func TestInvalidRequestsNeverPrompt(t *testing.T) {
 		{Version: 1, ID: "bad", Reason: "action", TimeoutMS: 100},
 		{Version: 1, ID: strings.Repeat("a", 32), Reason: " \n", TimeoutMS: 100},
 		{Version: 1, ID: strings.Repeat("a", 32), Reason: "action", TimeoutMS: -1},
+		{Version: 1, ID: strings.Repeat("a", 32), Reason: "action", TimeoutMS: 100, Agent: &approvalwire.AgentIdentity{Type: "codex"}},
+		{Version: 1, ID: strings.Repeat("a", 32), Reason: "action", TimeoutMS: 100, Agent: &approvalwire.AgentIdentity{Type: "codex", ID: "hidden\u202etext"}},
 	}
 	for _, r := range cases {
 		conn, err := (&net.Dialer{}).DialContext(t.Context(), "unix", path)

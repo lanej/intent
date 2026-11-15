@@ -34,6 +34,11 @@ func Review(ctx context.Context, review intent.Review) (intent.Result, error) {
 		return intent.Result{}, err
 	}
 
+	if review.Agent != nil {
+		snapshot := *review.Agent
+		review.Agent = &snapshot
+	}
+
 	if err := validate(review); err != nil {
 		return intent.Result{}, err
 	}
@@ -43,7 +48,7 @@ func Review(ctx context.Context, review intent.Review) (intent.Result, error) {
 		return intent.Result{}, err
 	}
 
-	p := prompt{Version: 1, ID: hex.EncodeToString(nonce), Review: review}
+	p := prompt{Version: 1, ID: hex.EncodeToString(nonce), Review: presentation(review)}
 
 	helper, err := materialize(ctx)
 	if err != nil {
@@ -55,6 +60,19 @@ func Review(ctx context.Context, review intent.Review) (intent.Result, error) {
 	}
 
 	return run(ctx, helper, p)
+}
+
+// The embedded renderer currently accepts text sections. Project typed identity
+// into its summary without changing the caller's Review or rebuilding assets.
+func presentation(review intent.Review) intent.Review {
+	if review.Agent == nil {
+		return review
+	}
+
+	review.Summary = fmt.Sprintf("Agent type (caller supplied): %s\nAgent ID (caller supplied): %s\n\n%s", review.Agent.Type, review.Agent.ID, review.Summary)
+	review.Agent = nil
+
+	return review
 }
 
 func validate(r intent.Review) error { return r.Validate() }

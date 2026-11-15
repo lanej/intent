@@ -21,6 +21,8 @@ type Review struct {
 	Title   string `json:"title"`
 	Summary string `json:"summary"`
 	Details string `json:"details"`
+	// Agent is optional caller-supplied context, projected into the native review.
+	Agent *AgentIdentity `json:"agent,omitempty"`
 }
 
 // Validate checks the review size and text contract without altering its content.
@@ -40,6 +42,10 @@ func (r Review) Validate() error {
 				return errors.New("review contains control or formatting characters")
 			}
 		}
+	}
+
+	if r.Agent != nil {
+		return r.Agent.Validate()
 	}
 
 	return nil
