@@ -341,7 +341,6 @@ final class Preview: NSObject, NSApplicationDelegate {
         window.contentView = content
         let rootStack = stack([], spacing: 12)
         pin(rootStack, in: content, inset: 24)
-        fullWidth(label("Preview only · no approvals are issued", size: 10, secondary: true), in: rootStack)
         let scroll = NSScrollView()
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true

@@ -1,6 +1,6 @@
 # Structured Mac approval preview
 
-A standalone AppKit prototype for presenting structured approval content with application branding. The title and subtitle share a header row with application identity. The revised design separates preview settings from the approval, emphasizes the credential scope and expiry, and opens directly in a simulated authentication-waiting state. It remains separate from Intent's public SDK, production helper and SSH transport. No credential is read, no command runs, and no approval or authentication is issued. A fixed cue above the review always identifies it as a preview; the bottom section contains only authentication methods, password fallback, denial and their result.
+A standalone AppKit prototype for presenting structured approval content with application branding. The title and subtitle share a header row with application identity. The revised design separates preview settings from the approval, emphasizes the credential scope and expiry, and opens directly in a simulated authentication-waiting state. It remains separate from Intent's public SDK, production helper and SSH transport. No credential is read, no command runs, and no approval or authentication is issued. The window title identifies this as an approval preview; the bottom section contains only authentication methods, password fallback, denial and their result.
 
 ## Run on a Mac
 
@@ -43,7 +43,7 @@ python3 experiments/mac-review/preview.py --capture /tmp/intent-review-captures
 
 This renders ten native AppKit content-view bitmaps and exits. These are view exports, not desktop screenshots; window chrome and the separate settings window are excluded. Pixel density follows the rendering environment. Direct bitmap rendering preserves scroll clipping, avoiding the footer bleed observed with PDF exports. Custom AppKit drawing keeps prototype controls visible in exports; `NSButton` and `NSPopUpButton` retain native action, menu and accessibility behavior, which still needs live verification.
 
-Normal captures use a 560×640 content viewport. The long-content export fits its document for inspection; `bounded-large.png` instead uses 520×580 and intentionally shows overflow with a fixed footer and scroll hint. Settings and approval remain separate; the fixed preview cue and method/password controls stay visible when the request scrolls.
+Normal captures use a 560×640 content viewport. The long-content export fits its document for inspection; `bounded-large.png` instead uses 520×580 and intentionally shows overflow with a fixed footer and scroll hint. Settings and approval remain separate; the method/password controls stay visible when the request scrolls.
 
 | Variant | Artifact |
 | --- | --- |
