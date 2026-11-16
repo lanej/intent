@@ -10,9 +10,14 @@ import (
 
 func Native() Authenticate {
 	return func(ctx context.Context, p Prompt) approval.Decision {
+		sessionLabel := "SSH session"
+		if p.Shared {
+			sessionLabel = "Approval service instance"
+		}
+
 		result, err := native.Review(ctx, approval.Review{
 			Title:   "Approve a remote request",
-			Summary: fmt.Sprintf("SSH target: %s\nSession: %s\n\nThe remote caller supplies the reason below. Approval does not verify or execute the claimed action.", p.Host, p.Session),
+			Summary: fmt.Sprintf("Configured SSH target: %s\n%s: %s\n\nThe remote caller supplies the reason below. Approval does not verify or execute the claimed action.", p.Host, sessionLabel, p.Session),
 			Details: p.Reason,
 			Agent:   p.Agent,
 		})

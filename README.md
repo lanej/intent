@@ -18,21 +18,42 @@ Mac consumers need no separate app bundle, Swift compiler, CGo, or runtime downl
 
 ## Approve remotely
 
-Install the CLI on the Mac and on the remote host's noninteractive SSH PATH. Configure ports, identities, and jump hosts through your ordinary SSH config, then run from the Mac:
+Configure your ordinary SSH host aliases on the Mac. Intent installs an early, host-specific Include that adds one private approval forward and a local service hook. It does not open SSH connections, change authentication or jump hosts, enable multiplexing, or clear application forwards. This setup requires a source build from this revision; the v0.1.0 release predates `configure-ssh`.
 
 ```sh
-intent ssh user@host
+intent configure-ssh --host dev --directory /home/you/.intent-approval
+ssh dev
 ```
 
-Inside that remote shell:
+The directory is the remote user's absolute private socket directory, with mode 0700. Paths must be short enough for a socket basename containing two 32-character IDs; configuration rejects paths beyond the portable 103-byte limit. Use one profile per configured host. `configure-ssh` prints the profile, Mac routing ID, and stable remote socket path. `--executable` selects an absolute installed Intent binary; otherwise the current executable is used. `--ssh-config` selects a configuration file. Existing configuration symlinks and user settings are preserved. An existing `LocalCommand` is a setup conflict and is preserved; combine the local Intent hook explicitly before using this configuration.
+
+Set this variable in the remote shell's startup file (`~/.zshenv` for zsh, including noninteractive SSH commands):
+
+```sh
+export INTENT_APPROVAL_SOCKET="$HOME/.intent-approval/approval.sock"
+```
+
+Run the remote broker as a persistent user service, using the Mac routing ID printed during configuration:
+
+```sh
+intent serve-remote --directory "$HOME/.intent-approval" --mac-id MAC_ROUTING_ID
+```
+
+The broker owns the stable `approval.sock`; each ordinary SSH connection creates a distinct transport socket beside it. The routing ID identifies the configured Mac and is not a secret or proof of identity. New requests use the newest live socket for that Mac, ordered by socket modification time then basename. When that transport disappears, new calls can use another live connection to the same Mac. Submitted requests stay on their original transport and are never replayed.
+
+The laptop service starts on demand through `LocalCommand` and remains available for later connections to that profile. The hook waits only for local readiness, returns promptly, and performs no remote command. `ssh -G` only prepares configuration metadata; it does not start approval UI or the service. Concurrent parsers get independent transport IDs, and repeated parsing by one process reuses its ID. Foreground, noninteractive, and `ssh -f` connections use the same setup. User overrides such as `ClearAllForwardings=yes`, `PermitLocalCommand=no`, or an earlier `LocalCommand` can disable parts of it.
+
+Inside the remote shell:
 
 ```sh
 intent request --reason 'Deploy revision abc123 to production' && ./deploy abc123
 ```
 
-The legacy production launcher exposes a private one-time approval socket as `INTENT_APPROVAL_SOCKET` and uses SSH multiplexing. It forwards no credential endpoints and leaves your authentication agent alone. The [stable remote socket proof](experiments/stable-socket/README.md) explores dedicated connections without multiplexing; production integration is pending. [Dotfiles](https://github.com/lanej/dotfiles) installs Intent and Keylease independently. Its `make intent-ssh` target currently rejects activation, while `make intent-ssh-remove` retires the old managed hook.
+Go applications need only the SDK and a reachable approval socket. They do not need an installed Intent executable. A user service may run the CLI broker, or an application may embed it with `intent.ServeRemoteBroker(ctx, intent.RemoteBrokerConfig{Directory: directory, MacID: macID})`. Provision the broker independently of SSH login; SSH does not invoke a remote CLI for approval setup. Applications started by service managers also need the socket variable in their service environment, or can use `intent.NewClient(socketPath)` directly.
 
 `intent request` writes JSON with `request_id` and `decision`. Exit codes are approved **0**, denied **2**, cancelled **3**, timed out **4**, unavailable **5**, and busy **6**. Operational or caller-context errors use **1**. `--timeout 30s` shortens the maximum two-minute request lifetime. An expired caller can return a context error before receiving a timeout decision; neither permits proceeding.
+
+The explicit legacy `intent ssh` launcher and mux hook remain available for older setups. They are separate from ordinary SSH configuration and retain their remote CLI dependency. Dotfiles installation remains separate from activation; its older `make intent-ssh` integration does not install this new configuration.
 
 ## Agent identity
 
@@ -104,13 +125,13 @@ The SDK manages a private helper process and its lifecycle without requiring an 
 
 ## Lifetime and trust
 
-Every approval requires explicit review and fresh OS authentication. Approvals are not cached or leased. One request can be pending per SSH broker; overlaps receive `Busy`. Cancellation, expiry, and transport loss cancel pending UI and prevent late success. Requests are never automatically retried after submission. `intent.ErrOutcomeUnknown` means no trustworthy decision was received; do not infer approval or automatically repeat the request.
+Every approval requires explicit review and fresh OS authentication. Approvals are not cached or leased. One request can be pending per Mac profile service; overlaps receive `Busy`. Cancellation, expiry, and transport loss cancel pending UI and prevent late success. Requests are never automatically retried after submission. `intent.ErrOutcomeUnknown` means no trustworthy decision was received; do not infer approval or automatically repeat the request.
 
-The legacy hook uses its SSH master's local connection metadata. Proxy transports may hide the destination; the review then reports it unavailable. Remote root and same-user processes can access the forwarded endpoint, and Intent cannot establish which remote process made a request. Same-user processes on the Mac are also outside its isolation boundary. Intent provides no signed receipts or privileged enforcement.
+Ordinary SSH reviews show the configured host alias and approval service instance. They do not claim that instance is a particular SSH connection. Remote shell exit alone may leave an SSH client running while an approval channel remains open; caller cancellation, deadline, and actual transport loss still cancel that request. The legacy hook uses its SSH master's local connection metadata, which may not expose a proxy destination. Remote root and same-user processes can access the forwarded endpoint, and Intent cannot establish which remote process made a request. Same-user processes on the Mac are also outside its isolation boundary. Intent provides no signed receipts or privileged enforcement.
 
 Helper bytes and signatures live in an owner-only content-addressed cache at `~/Library/Caches/dev.joshlane.intent`. The SDK checks ownership, permissions, and content before execution, and fails closed on unexpected or altered entries. Remove that cache while no reviews are running to recover from corruption; it is recreated from embedded assets. Review content, credentials, and decisions are never stored there.
 
-The automatic broker stops with its SSH master without sustaining idle connections. New setup conservatively removes stale owned receipts and matching private endpoints only when no socket listener exists. Uncertain failures and unexpected files are preserved. Final disconnected metadata can remain until the next setup; it contains no credentials or decisions. Hook diagnostics are under `~/.intent-ssh/*.log`.
+The ordinary SSH service persists independently of individual SSH clients and never sustains an SSH connection. The remote broker independently sweeps owned transport sockets whose connection is refused, preserving endpoints on timeout or other uncertain failures and preserving unexpected files. Metadata and private logs under `~/.intent-ssh/` contain no approval reasons, credentials, or decisions. Changing an installed CLI does not replace already-running approval services; restart those services separately when upgrading.
 
 ## Develop and verify
 
@@ -118,7 +139,7 @@ The automatic broker stops with its SSH master without sustaining idle connectio
 
 `INTENT_SSH_INTEGRATION=1 go test -v ./internal/approvalssh -run TestOpenSSHIntegration` exercises a disposable real loopback sshd with synthetic approval callbacks, including decisions, cancellation, multiplexing, reconnect, idle expiry, and stale cleanup. It changes no user SSH configuration.
 
-A [stable remote socket design and executable proof](experiments/stable-socket/README.md) explores a separate non-multiplexed transport. It is not installed or enabled by the production CLI.
+The [stable remote socket proof](experiments/stable-socket/README.md) is historical experimental work with its own transport lifecycle. Ordinary SSH configuration above uses user-owned connections and has separate integration coverage: `INTENT_SSH_INTEGRATION=1 go test -v ./internal/approvalconfig -run TestOrdinaryOpenSSHIntegration`. It checks concurrent connections, shared-service Busy, cancellation, background SSH, and functional application forwards with synthetic authentication.
 
 A [structured Mac approval preview](experiments/mac-review/README.md) explores application branding and human presentation of structured requests. It is a standalone, inert prototype. Agent metadata is supported separately by the SDK and request CLI; the visual prototype is not installed or enabled by production commands.
 
@@ -126,7 +147,7 @@ Human authentication and rendered interaction remain unverified. To exercise the
 
 ## Migrate from Keylease
 
-Use `intent request` instead of `keylease approval request`, `intent ssh` instead of `keylease ssh`, `github.com/lanej/intent` instead of `github.com/lanej/keylease/approval`, and `INTENT_APPROVAL_SOCKET` instead of `KEYLEASE_APPROVAL_SOCKET`. No compatibility aliases are provided. Install Intent on both SSH endpoints. Dotfiles automatic SSH activation awaits production stable-socket integration; `make intent-ssh-remove` retires its old managed configuration. Existing sessions are not terminated. Keylease credential review uses this SDK directly and retains its credential policy.
+Use `intent request` instead of `keylease approval request`, ordinary `ssh` with configured Intent forwarding instead of `keylease ssh`, `github.com/lanej/intent` instead of `github.com/lanej/keylease/approval`, and `INTENT_APPROVAL_SOCKET` instead of `KEYLEASE_APPROVAL_SOCKET`. No compatibility aliases are provided. Install Intent on the Mac and on remote hosts using the CLI broker; applications may embed the remote broker instead. `make intent-ssh-remove` retires old dotfiles-managed configuration. Existing sessions are not terminated. Keylease credential review uses this SDK directly and retains its credential policy.
 
 ## License
 
