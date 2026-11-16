@@ -1,7 +1,7 @@
 {
-  "source_sha256": "5916fb9847d7d5228d90812760630ef32875c877cf10e5ad304f93ce9f323841",
+  "source_sha256": "0570536e156922e9f2444d121b8d45fea5ac0adf98468b8911a9834aeba13f1d",
   "assets": {
-    "darwin-arm64.zip": "9cffaa908647e11df2d2b1dc30af832bb44f1131004b5e53890e48b1abeb5549",
-    "darwin-amd64.zip": "c323fe0b2d604e9cabc3a163a17c596445b9cffad03f1810b0ea84afb0e29bc6"
+    "darwin-arm64.zip": "0bf62d7edaa7e51a81ba28bfda4c52a4c8ca95a1894e869675bf4902adf42ebd",
+    "darwin-amd64.zip": "f4ad0ddf3baa43ecd265482ae62846a064093a1e963d501ea72dbd8a623bbd9c"
   }
 }

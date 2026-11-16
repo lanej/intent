@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"slices"
 	"time"
 
 	"github.com/lanej/intent"
@@ -34,10 +35,7 @@ func Review(ctx context.Context, review intent.Review) (intent.Result, error) {
 		return intent.Result{}, err
 	}
 
-	if review.Agent != nil {
-		snapshot := *review.Agent
-		review.Agent = &snapshot
-	}
+	review = snapshot(review)
 
 	if err := validate(review); err != nil {
 		return intent.Result{}, err
@@ -48,7 +46,7 @@ func Review(ctx context.Context, review intent.Review) (intent.Result, error) {
 		return intent.Result{}, err
 	}
 
-	p := prompt{Version: 1, ID: hex.EncodeToString(nonce), Review: presentation(review)}
+	p := prompt{Version: 1, ID: hex.EncodeToString(nonce), Review: review}
 
 	helper, err := materialize(ctx)
 	if err != nil {
@@ -62,15 +60,20 @@ func Review(ctx context.Context, review intent.Review) (intent.Result, error) {
 	return run(ctx, helper, p)
 }
 
-// The embedded renderer currently accepts text sections. Project typed identity
-// into its summary without changing the caller's Review or rebuilding assets.
-func presentation(review intent.Review) intent.Review {
-	if review.Agent == nil {
-		return review
+// Copy mutable display metadata before validation and helper serialization.
+func snapshot(review intent.Review) intent.Review {
+	if review.Agent != nil {
+		agent := *review.Agent
+		review.Agent = &agent
 	}
 
-	review.Summary = fmt.Sprintf("Agent type (caller supplied): %s\nAgent ID (caller supplied): %s\n\n%s", review.Agent.Type, review.Agent.ID, review.Summary)
-	review.Agent = nil
+	if review.Card != nil {
+		card := *review.Card
+		card.Access = slices.Clone(card.Access)
+		card.Facts = slices.Clone(card.Facts)
+		card.Credentials = slices.Clone(card.Credentials)
+		review.Card = &card
+	}
 
 	return review
 }

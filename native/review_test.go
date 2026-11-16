@@ -116,7 +116,7 @@ func TestAcceptedEscapeHeavyReviewFitsNativeFrame(t *testing.T) {
 
 	t.Setenv("INTENT_TEST_HELPER", "approved")
 
-	review := approval.Review{Title: strings.Repeat("&", 256), Summary: strings.Repeat("<", approval.MaxReviewSummary), Details: strings.Repeat(">", approval.MaxReviewDetails)}
+	review := approval.Review{Title: strings.Repeat("&", 256), Summary: strings.Repeat("<", approval.MaxReviewSummary), Details: strings.Repeat("\t", approval.MaxReviewDetails), Card: &approval.ReviewCard{Application: "A", Subtitle: strings.Repeat("\t", approval.MaxCardText-1)}}
 	if validateErr := validate(review); validateErr != nil {
 		t.Fatal(validateErr)
 	}
@@ -127,15 +127,16 @@ func TestAcceptedEscapeHeavyReviewFitsNativeFrame(t *testing.T) {
 	}
 }
 
-func TestAgentPresentationPreservesClaimsAndCallerInput(t *testing.T) {
-	original := approval.Review{Title: "Release", Summary: "SSH target: fixture", Details: "Deploy abc123", Agent: &approval.AgentIdentity{Type: "codex", ID: "thread-native-fixture"}}
+func TestSnapshotPreservesImmutableDisplay(t *testing.T) {
+	original := approval.Review{Title: "Release", Summary: "SSH target: fixture", Details: "Deploy abc123", Agent: &approval.AgentIdentity{Type: "codex", ID: "thread-native-fixture"}, Card: &approval.ReviewCard{Application: "Keylease", Access: []approval.ReviewFact{{Label: "Expires", Value: "12:00"}}, Credentials: []approval.ReviewCredential{{Name: "Token", Variable: "TOKEN"}}, Facts: []approval.ReviewFact{{Label: "Use", Value: "command", CallerSupplied: true}}}}
+	frozen := snapshot(original)
+	original.Agent.ID = "changed"
+	original.Card.Application = "changed"
+	original.Card.Access[0].Value = "changed"
+	original.Card.Credentials[0].Name = "changed"
 
-	projected := presentation(original)
-	if !strings.Contains(projected.Summary, "Agent type (caller supplied): codex") || !strings.Contains(projected.Summary, "Agent ID (caller supplied): thread-native-fixture") || !strings.Contains(projected.Summary, original.Summary) {
-		t.Fatalf("agent context missing: %+v", projected)
-	}
-
-	if original.Summary != "SSH target: fixture" || original.Agent == nil || projected.Title != original.Title || projected.Details != original.Details || projected.Agent != nil {
-		t.Fatal("presentation mutated input or leaked unsupported fields to the legacy renderer")
+	original.Card.Facts[0].Value = "changed"
+	if frozen.Agent.ID != "thread-native-fixture" || frozen.Card.Application != "Keylease" || frozen.Card.Access[0].Value != "12:00" || frozen.Card.Credentials[0].Name != "Token" || frozen.Card.Facts[0].Value != "command" || !frozen.Card.Facts[0].CallerSupplied || frozen.Summary != "SSH target: fixture" || frozen.Details != "Deploy abc123" {
+		t.Fatal("display snapshot changed")
 	}
 }
