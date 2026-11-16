@@ -77,7 +77,7 @@ SSH does not automatically forward agent environment variables. An agent running
 
 The Go library never infers agent identity from environment variables. Set `Request.Agent` for a remote request or `Review.Agent` for a local native review. Both fields are optional for non-agent callers. `AgentIdentity` requires both `Type` (1–64 UTF-8 bytes) and `ID` (1–256 bytes), without whitespace, control or formatting characters. Preserve the identity while the call is pending.
 
-Agent-bearing SSH requests require updated clients and Mac approval brokers. Older strict brokers reject the new field; the client never drops identity or retries to obtain approval. Requests without identity keep their existing wire shape. The existing native renderer displays type and ID as labeled caller-supplied summary fields; the experimental card renders them as structured fields.
+Agent-bearing SSH requests require updated clients and Mac approval brokers. Older strict brokers reject the new field; the client never drops identity or retries to obtain approval. Requests without identity keep their existing wire shape. The native card displays type and ID as structured fields labeled caller supplied.
 
 ## Go libraries
 
@@ -121,6 +121,8 @@ if result.Decision != intent.Approved {
 return deploy(ctx, "abc123")
 ```
 
+Optional `Review.Card` groups trusted display metadata into application branding, access facts, credential names and variables, caller-labeled facts, and a notice. It never contains credential values or changes authentication or application authority. `Summary` and `Details` remain available through Complete request. The card accepts up to three access facts, 32 other facts, 128 credentials, and 64 KiB of combined UTF-8 text; application artwork is bundled for known apps and never loaded from request paths or URLs.
+
 The SDK manages a private helper process and its lifecycle without requiring an installed `intent` CLI or AppKit setup in your process. Titles are limited to 256 bytes, summaries to 64 KiB, and scrollable details to 256 KiB; all must be UTF-8 without control or formatting characters except tabs and newlines. Label caller-supplied claims in your review. Non-macOS native calls return `Unavailable`.
 
 ## Lifetime and trust
@@ -141,9 +143,11 @@ The ordinary SSH service persists independently of individual SSH clients and ne
 
 The [stable remote socket proof](experiments/stable-socket/README.md) is historical experimental work with its own transport lifecycle. Ordinary SSH configuration above uses user-owned connections and has separate integration coverage: `INTENT_SSH_INTEGRATION=1 go test -v ./internal/approvalconfig -run TestOrdinaryOpenSSHIntegration`. It checks concurrent connections, shared-service Busy, cancellation, background SSH, and functional application forwards with synthetic authentication.
 
-A [structured Mac approval preview](experiments/mac-review/README.md) explores application branding and human presentation of structured requests. It is a standalone, inert prototype. Agent metadata is supported separately by the SDK and request CLI; the visual prototype is not installed or enabled by production commands.
+The production Mac card stays open for review until you select Approve or Use Password. Approve starts the standard macOS authentication dialog with a new context, using the methods macOS makes available. Use Password requests Mac password authentication separately; Intent never receives the password. Opening the card never begins authentication or issues approval. Deny, Escape, and closing the card decline the request.
 
-Human authentication and rendered interaction remain unverified. To exercise them explicitly on your Mac, run `INTENT_NATIVE_ACCEPTANCE=1 go test -v ./native -run TestHumanAcceptance`: authenticate the first request and deny the second. Repeat for each available method; only the method actually exercised is verified.
+A [structured Mac approval preview](experiments/mac-review/README.md) explores application branding and human presentation of structured requests. It is a standalone, inert prototype. Its simulation settings are confined to the experiment; production uses the card renderer and real local macOS capabilities.
+
+Run `python3 scripts/check-native-card.py --output-dir /tmp/intent-card-captures` on macOS to inspect the production renderer in light, dark, plaintext, and bounded long-request layouts. This separate capture executable never evaluates authentication or issues approval. For real human authentication, run `INTENT_NATIVE_ACCEPTANCE=1 gotestsum -- -count=1 -v ./native -run TestHumanAcceptance`: select Approve on the first card and confirm with Touch ID or Apple Watch, use the macOS password option on the second, and deny the third. Only the methods actually exercised are verified; automated captures cannot establish authentication.
 
 ## Migrate from Keylease
 

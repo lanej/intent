@@ -9,7 +9,7 @@ import zipfile
 
 root = Path(__file__).resolve().parents[1]
 source = root / 'native'
-manifest = {'source_sha256': hashlib.sha256((source / 'Intent.swift').read_bytes() + (source / 'Info.plist').read_bytes()).hexdigest(), 'assets': {}}
+manifest = {'source_sha256': hashlib.sha256(b''.join(path.read_bytes() for path in sorted([*source.glob('*.swift'), source / 'Info.plist', *(source / 'Resources').glob('*')]))).hexdigest(), 'assets': {}}
 for arch in ('arm64', 'amd64'):
     build = source / 'build' / arch
     if build.exists():
@@ -18,8 +18,9 @@ for arch in ('arm64', 'amd64'):
     exe = app / 'Contents/MacOS/Intent'
     exe.parent.mkdir(parents=True)
     target = ('arm64' if arch == 'arm64' else 'x86_64') + '-apple-macos13.0'
-    subprocess.run(['swiftc', '-O', '-target', target, '-o', str(exe), str(source / 'Intent.swift'), '-framework', 'AppKit', '-framework', 'LocalAuthentication'], check=True)
+    subprocess.run(['swiftc', '-O', '-target', target, '-o', str(exe), *[str(path) for path in sorted(source.glob('*.swift'))], '-framework', 'AppKit', '-framework', 'LocalAuthentication', '-framework', 'Security'], check=True)
     shutil.copyfile(source / 'Info.plist', app / 'Contents/Info.plist')
+    shutil.copytree(source / 'Resources', app / 'Contents/Resources')
     subprocess.run(['codesign', '--force', '--sign', '-', str(app)], check=True)
     subprocess.run(['codesign', '--verify', '--strict', str(app)], check=True)
     asset = source / 'assets' / f'darwin-{arch}.zip'

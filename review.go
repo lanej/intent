@@ -21,8 +21,11 @@ type Review struct {
 	Title   string `json:"title"`
 	Summary string `json:"summary"`
 	Details string `json:"details"`
-	// Agent is optional caller-supplied context, projected into the native review.
+	// Agent is optional caller-supplied context shown with its provenance.
 	Agent *AgentIdentity `json:"agent,omitempty"`
+	// Card is optional structured display content. Summary and Details remain
+	// available in full; none of these fields restrict or authorize an action.
+	Card *ReviewCard `json:"card,omitempty"`
 }
 
 // Validate checks the review size and text contract without altering its content.
@@ -45,7 +48,13 @@ func (r Review) Validate() error {
 	}
 
 	if r.Agent != nil {
-		return r.Agent.Validate()
+		if err := r.Agent.Validate(); err != nil {
+			return err
+		}
+	}
+
+	if r.Card != nil {
+		return r.Card.Validate()
 	}
 
 	return nil
