@@ -18,7 +18,9 @@ Mac consumers need no separate app bundle, Swift compiler, CGo, or runtime downl
 
 ## Approve remotely
 
-Install the CLI on the Mac and on the remote host's noninteractive SSH PATH. Configure ports, identities, and jump hosts through your ordinary SSH config, then run from the Mac:
+Go applications using the approval client need only a reachable approval socket; they do not need an installed Intent executable. The `intent ssh` launcher currently uses the remote CLI to prepare its socket, start the shell, and clean up the session.
+
+For that launcher, install the CLI on the Mac and on the remote host's noninteractive SSH PATH. Configure ports, identities, and jump hosts through your ordinary SSH config, then run from the Mac:
 
 ```sh
 intent ssh user@host

@@ -137,7 +137,23 @@ test "$approved" = 0 && test "$denied" = 2
 
 	defer func() { stopServer(); <-serverDone }()
 
+	occupiedForward, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer testutil.Close(t, occupiedForward)
+
+	forwardAddress, ok := occupiedForward.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatal("fixture forward listener has no TCP address")
+	}
+
+	unrequestedSocket := filepath.Join(dir, "unrequested.sock")
+
 	clientConfig := fmt.Sprintf("Host fixture\n HostName 127.0.0.1\n Port %d\n User %s\n IdentityFile %s\n IdentitiesOnly yes\n BatchMode yes\n StrictHostKeyChecking no\n UserKnownHostsFile /dev/null\n LogLevel ERROR\n", port, current.Username, filepath.Join(dir, "client"))
+
+	// Configured application forwards must not be recreated by approval setup.
+	clientConfig += fmt.Sprintf(" LocalForward 127.0.0.1:%d 127.0.0.1:9\n RemoteForward %s 127.0.0.1:9\n", forwardAddress.Port, unrequestedSocket)
 
 	sshConfig := filepath.Join(dir, "ssh_config")
 	if err = os.WriteFile(sshConfig, []byte(clientConfig), 0o600); err != nil {
@@ -243,6 +259,10 @@ test "$approved" = 0 && test "$denied" = 2
 
 		select {
 		case <-cancelled:
+			if _, statErr := os.Lstat(unrequestedSocket); !os.IsNotExist(statErr) {
+				t.Fatalf("approval setup activated an unrelated configured forward: %v", statErr)
+			}
+
 			// Cleanup deliberately takes a second. Cancellation should precede it.
 			if _, statErr := os.Stat(filepath.Join(dir, "cleanup-finished")); !os.IsNotExist(statErr) {
 				t.Fatalf("pending UI survived until remote cleanup finished: %v", statErr)
@@ -253,6 +273,8 @@ test "$approved" = 0 && test "$denied" = 2
 				t.Fatalf("launcher ended before pending cancellation was observed: %v", localErr)
 			default:
 			}
+		case launchErr := <-done:
+			t.Fatalf("launcher stopped before approval: %v", launchErr)
 		case <-ctx.Done():
 			t.Fatal("pending request survived shell exit")
 		}

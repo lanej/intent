@@ -142,7 +142,7 @@ func launch(ctx context.Context, host string, authenticate intent.Authenticate) 
 	// Disable fallback connections for every channel: if the master disappears,
 	// ProxyCommand=false fails closed rather than starting another SSH transport.
 	run := func(c context.Context, tty bool, args ...string) *exec.Cmd {
-		options := []string{"-S", control, "-o", "PermitLocalCommand=no", "-o", "ControlMaster=no", "-o", "ProxyCommand=false", "-o", "RemoteCommand=none"}
+		options := []string{"-S", control, "-o", "PermitLocalCommand=no", "-o", "ClearAllForwardings=yes", "-o", "ControlMaster=no", "-o", "ProxyCommand=false", "-o", "RemoteCommand=none"}
 		if tty {
 			options = append(options, "-tt")
 		} else {
@@ -166,7 +166,7 @@ func launch(ctx context.Context, host string, authenticate intent.Authenticate) 
 
 	prepare.Stderr = os.Stderr
 	if err = prepare.Run(); err != nil {
-		return fmt.Errorf("remote approval setup (install Intent on remote PATH): %w", err)
+		return fmt.Errorf("remote approval endpoint preparation: %w", err)
 	}
 
 	var remote prepared
@@ -187,7 +187,8 @@ func launch(ctx context.Context, host string, authenticate intent.Authenticate) 
 	// remote processes must not create prompts after the shell has exited.
 	defer stopService()
 
-	forward := exec.CommandContext(sessionCtx, "ssh", "-S", control, "-O", "forward", "-o", "ExitOnForwardFailure=yes", "-o", "StreamLocalBindUnlink=no", "-R", remote.Socket+":"+socket, "--", host) // #nosec G204 -- Validated SSH or shell parameters are passed as argv; remote helper arguments are shell-quoted.
+	// Use only the explicit approval forward; host configuration may add unrelated endpoints.
+	forward := exec.CommandContext(sessionCtx, "ssh", "-F", "/dev/null", "-S", control, "-O", "forward", "-o", "ClearAllForwardings=no", "-o", "ExitOnForwardFailure=yes", "-o", "StreamLocalBindUnlink=no", "-R", remote.Socket+":"+socket, "--", host) // #nosec G204 -- Validated SSH or shell parameters are passed as argv; remote helper arguments are shell-quoted.
 
 	forward.Stderr = os.Stderr
 	if err = forward.Run(); err != nil {
