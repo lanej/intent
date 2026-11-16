@@ -21,6 +21,7 @@ type Prompt struct {
 	ID      string                  `json:"request_id"`
 	Host    string                  `json:"host"`
 	Session string                  `json:"session"`
+	Shared  bool                    `json:"shared,omitempty"`
 	Reason  string                  `json:"reason"`
 	Agent   *approval.AgentIdentity `json:"agent,omitempty"`
 }
@@ -30,6 +31,7 @@ type Authenticate func(context.Context, Prompt) approval.Decision
 
 type Service struct {
 	Host         string
+	Shared       bool
 	Session      string
 	Authenticate Authenticate
 	mu           sync.Mutex
@@ -145,7 +147,7 @@ func (s *Service) handle(parent context.Context, conn net.Conn) {
 
 	decision := approval.Unavailable
 	if s.Authenticate != nil && ctx.Err() == nil {
-		decision = s.Authenticate(ctx, Prompt{Version: 1, Kind: "one_time", ID: request.ID, Host: s.Host, Session: s.Session, Reason: request.Reason, Agent: agent})
+		decision = s.Authenticate(ctx, Prompt{Version: 1, Kind: "one_time", ID: request.ID, Host: s.Host, Session: s.Session, Shared: s.Shared, Reason: request.Reason, Agent: agent})
 	}
 
 	if ctx.Err() != nil {
