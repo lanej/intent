@@ -102,9 +102,10 @@ final class ApprovalController: NSObject, NSApplicationDelegate, NSWindowDelegat
         let data = FileHandle.standardInput.readDataToEndOfFile()
         guard data.count <= 1048576, let request = try? JSONDecoder().decode(Request.self, from: data),
               request.version == 1, request.request_id.count == 32, !request.review.title.isEmpty else { exit(2) }
-        let controller = ApprovalController(request: request)
         let app = NSApplication.shared
-        app.setActivationPolicy(.accessory); app.delegate = controller
+        app.setActivationPolicy(.accessory)
+        let controller = ApprovalController(request: request)
+        app.delegate = controller
         withExtendedLifetime(controller) { app.run() }
         exit(1)
     }
