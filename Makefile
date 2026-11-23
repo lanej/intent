@@ -4,10 +4,9 @@ GO_PROFILE_TOOLCHAIN := go$(shell sed -n 's/^go //p' go.mod)
 PREFIX ?= $(HOME)/.local
 build:
 	mkdir -p bin
-	go build -o bin/intent ./cmd/intent
+	python3 scripts/build-lifecycle.py --tool intent --output bin/intent --manifest bin/intent.build.json
 install: build
-	install -d "$(PREFIX)/bin"
-	install -m 755 bin/intent "$(PREFIX)/bin/intent"
+	python3 scripts/install-lifecycle.py --tool intent --source-bin "$(CURDIR)/bin" --prefix "$(PREFIX)"
 check: quality
 	python3 scripts/check-assets.py
 quality:

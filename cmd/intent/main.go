@@ -33,6 +33,10 @@ func run(ctx context.Context, args []string) error {
 		return err
 	}
 
+	if args[0] == "lifecycle" {
+		return lifecycleCommand(ctx, args[1:])
+	}
+
 	switch args[0] {
 	case "configure-ssh", "ssh-prepare", "ssh-match", "ssh-connected", "serve-local", "serve-remote":
 		return forwardingCommand(ctx, args)
