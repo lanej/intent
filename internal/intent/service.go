@@ -160,7 +160,12 @@ func (s *Service) handle(parent context.Context, conn net.Conn) {
 
 		ctx = requestCtx
 
-		closeOnCancel := context.AfterFunc(ctx, func() { cleanup.Close(conn) })
+		closeOnCancel := context.AfterFunc(ctx, func() {
+			// Deadline expiry still owes a timed_out reply after authentication exits.
+			if ctx.Err() == context.Canceled {
+				cleanup.Close(conn)
+			}
+		})
 		defer closeOnCancel()
 	}
 

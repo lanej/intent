@@ -6,20 +6,24 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/lanej/intent/internal/activation"
 	"github.com/lanej/intent/internal/testutil"
 
 	approval "github.com/lanej/intent"
 	"github.com/lanej/intent/internal/approvalwire"
 )
 
-func startService(t *testing.T, auth Authenticate) string {
+func startService(t *testing.T, auth Authenticate, lifecycle ...*activation.Runtime) string {
 	t.Helper()
 
 	dir, err := os.MkdirTemp("/tmp", "kl-test-") //nolint:usetesting // Unix socket fixtures require short paths on macOS.
@@ -38,6 +42,10 @@ func startService(t *testing.T, auth Authenticate) string {
 	done := make(chan error, 1)
 
 	service := &Service{Host: "configured-host", Session: "local-session", Authenticate: auth}
+	if len(lifecycle) != 0 {
+		service.Lifecycle = lifecycle[0]
+	}
+
 	go func() { done <- service.Serve(ctx, listener) }()
 
 	t.Cleanup(func() {
@@ -232,5 +240,157 @@ func TestDisconnectOrExtraDataCancelsPrompt(t *testing.T) {
 		}
 
 		testutil.Close(t, conn)
+	}
+}
+
+func approvalLifecycleFixture(t *testing.T) *activation.Runtime {
+	t.Helper()
+
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("native lifecycle owner identity is supported only on macOS and Linux")
+	}
+
+	owner, err := activation.New("approval-fixture", runtime.GOOS, runtime.GOARCH, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return owner
+}
+
+func TestLifecycleExpiryRepliesAfterAuthenticationReturns(t *testing.T) {
+	owner := approvalLifecycleFixture(t)
+	expired := make(chan struct{})
+	released := make(chan struct{})
+
+	var releaseOnce sync.Once
+
+	release := func() { releaseOnce.Do(func() { close(released) }) }
+	path := startService(t, func(ctx context.Context, _ Prompt) approval.Decision {
+		<-ctx.Done()
+		close(expired)
+		<-released
+
+		return approval.Approved
+	}, owner)
+	t.Cleanup(release)
+
+	conn, err := (&net.Dialer{}).DialContext(t.Context(), "unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer testutil.Close(t, conn)
+
+	request := approvalwire.Request{Version: 1, ID: strings.Repeat("a", 32), Reason: "expires", TimeoutMS: 20}
+	if err = json.NewEncoder(conn).Encode(request); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-expired:
+	case <-time.After(time.Second):
+		t.Fatal("authentication did not observe deadline")
+	}
+
+	testutil.Check(t, conn.SetReadDeadline(time.Now().Add(100*time.Millisecond)))
+
+	var response approvalwire.Response
+
+	err = approvalwire.Read(conn, &response)
+
+	var timeout net.Error
+	if !errors.As(err, &timeout) || !timeout.Timeout() {
+		t.Fatal("ordinary deadline closed connection before authentication returned", err)
+	}
+
+	testutil.Check(t, conn.SetReadDeadline(time.Now().Add(time.Second)))
+	release()
+
+	if err = approvalwire.Read(conn, &response); err != nil || response.Decision != "timed_out" {
+		t.Fatalf("lost timeout response or delivered late approval: %+v %v", response, err)
+	}
+}
+
+func TestLifecycleCancellationClosesConnectionBeforeAuthenticationExits(t *testing.T) {
+	owner := approvalLifecycleFixture(t)
+	entered := make(chan struct{})
+	interrupted := make(chan struct{})
+	released := make(chan struct{})
+
+	var releaseOnce sync.Once
+
+	release := func() { releaseOnce.Do(func() { close(released) }) }
+	path := startService(t, func(ctx context.Context, _ Prompt) approval.Decision {
+		close(entered)
+		<-ctx.Done()
+		close(interrupted)
+		<-released
+
+		return approval.Approved
+	}, owner)
+	t.Cleanup(release)
+
+	conn, err := (&net.Dialer{}).DialContext(t.Context(), "unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer testutil.Close(t, conn)
+
+	request := approvalwire.Request{Version: 1, ID: strings.Repeat("b", 32), Reason: "interrupted", TimeoutMS: 5000}
+	if err = json.NewEncoder(conn).Encode(request); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("authentication did not start")
+	}
+
+	type checkpointReply struct {
+		result activation.Result
+		err    error
+	}
+
+	checkpoint := make(chan checkpointReply, 1)
+
+	go func() {
+		result, _, controlErr := owner.Control(t.Context(), activation.Request{
+			Action: "checkpoint", RunID: "11111111-2222-4333-8444-555555555555", Process: owner.Snapshot().Targets[0].Process,
+		})
+		checkpoint <- checkpointReply{result: result, err: controlErr}
+	}()
+
+	select {
+	case <-interrupted:
+	case <-time.After(time.Second):
+		t.Fatal("checkpoint did not interrupt authentication")
+	}
+
+	testutil.Check(t, conn.SetReadDeadline(time.Now().Add(time.Second)))
+
+	var response approvalwire.Response
+	if err = approvalwire.Read(conn, &response); !errors.Is(err, io.EOF) {
+		t.Fatal("lifecycle cancellation did not close the connection immediately", err)
+	}
+
+	if owner.Snapshot().Targets[0].Checkpoint.State != "pending" {
+		t.Fatal("checkpoint confirmed before authentication exited")
+	}
+
+	release()
+
+	select {
+	case reply := <-checkpoint:
+		if reply.err != nil {
+			t.Fatal(reply.err)
+		}
+
+		state := reply.result.Targets[0].Checkpoint
+		if state.State != "confirmed" || len(state.Interrupted) != 1 || state.Interrupted[0].RequestID != request.ID || state.Interrupted[0].Outcome != "interrupted-or-unknown" {
+			t.Fatal("checkpoint lost interrupted request evidence", state)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("checkpoint did not confirm completed interruption")
 	}
 }
