@@ -81,7 +81,7 @@ type Runtime struct {
 	sequence     uint64
 	changed      chan struct{}
 	checkpoint   *Checkpoint
-	lastRun      string
+	consumedRuns map[string]struct{}
 	stop         context.CancelFunc
 	shutdownOnce sync.Once
 }
@@ -127,7 +127,7 @@ func New(target, platform, architecture string, stop context.CancelFunc) (*Runti
 		Target: target, RunningIdentity: artifact, ExpectedIdentity: artifact,
 		Executable: executable, Platform: platform, Architecture: architecture, Ready: true, Process: process,
 		Sessions: []Session{},
-	}, active: map[uint64]activeRequest{}, changed: make(chan struct{}), stop: stop}, nil
+	}, active: map[uint64]activeRequest{}, consumedRuns: map[string]struct{}{}, changed: make(chan struct{}), stop: stop}, nil
 }
 
 func (r *Runtime) notify() {
@@ -217,7 +217,7 @@ func (r *Runtime) Control(ctx context.Context, request Request) (Result, bool, e
 
 	switch request.Action {
 	case "checkpoint":
-		if r.lastRun == request.RunID {
+		if _, consumed := r.consumedRuns[request.RunID]; consumed {
 			r.mu.Unlock()
 			return Result{}, false, errors.New("checkpoint already restored; do not repeat cancellation")
 		}
@@ -265,7 +265,7 @@ func (r *Runtime) Control(ctx context.Context, request Request) (Result, bool, e
 				return Result{}, false, errors.New("stop-submitted checkpoint is irreversible")
 			}
 
-			r.lastRun = request.RunID
+			r.consumedRuns[request.RunID] = struct{}{}
 			r.checkpoint = nil
 			r.target.Ready = true
 		}
@@ -352,12 +352,12 @@ func (r *Runtime) ServeControl(parent context.Context, listener net.Listener) er
 				return
 			}
 
-			if encodeErr := json.NewEncoder(conn).Encode(result); encodeErr != nil {
-				return
+			if shutdown {
+				defer r.Stop()
 			}
 
-			if shutdown {
-				r.Stop()
+			if encodeErr := json.NewEncoder(conn).Encode(result); encodeErr != nil {
+				return
 			}
 		}()
 	}
