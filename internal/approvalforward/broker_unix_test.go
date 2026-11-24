@@ -15,6 +15,7 @@ import (
 	"time"
 
 	approval "github.com/lanej/intent"
+	"github.com/lanej/intent/internal/activation"
 	"github.com/lanej/intent/internal/approvalforward"
 	"github.com/lanej/intent/internal/intent"
 	"github.com/lanej/intent/internal/testutil"
@@ -355,5 +356,78 @@ func TestListenerClosePreservesReplacement(t *testing.T) {
 
 	if string(data) != "valuable replacement" {
 		t.Fatal("listener shutdown removed a replacement")
+	}
+}
+
+func TestLifecycleCheckpointCancelsWithoutApprovalReplay(t *testing.T) {
+	dir := shortDir(t)
+	entered := make(chan struct{}, 1)
+	cancelled := make(chan struct{}, 1)
+
+	var calls atomic.Int32
+
+	transport(t, dir, pairedMac, strings.Repeat("a", 32), func(ctx context.Context, _ intent.Prompt) approval.Decision {
+		calls.Add(1)
+
+		entered <- struct{}{}
+
+		<-ctx.Done()
+
+		cancelled <- struct{}{}
+
+		return approval.Approved
+	})
+	stopBroker := broker(t, dir)
+	endpoint := filepath.Join(dir, "approval.sock")
+	waitSocket(t, activation.ControlSocket(endpoint))
+	before, err := activation.Call(t.Context(), endpoint, activation.Request{Action: "inventory"})
+	testutil.Check(t, err)
+
+	process := before.Targets[0].Process
+	pending := make(chan error, 1)
+
+	go func() {
+		_, requestErr := approval.NewClient(endpoint).Approve(t.Context(), approval.Request{Reason: "interrupted approval"})
+		pending <- requestErr
+	}()
+
+	<-entered
+
+	request := activation.Request{Action: "checkpoint", Process: process, RunID: "11111111-2222-4333-8444-555555555555"}
+	after, err := activation.Call(t.Context(), endpoint, request)
+	testutil.Check(t, err)
+
+	if after.Targets[0].Checkpoint == nil || after.Targets[0].Checkpoint.State != "confirmed" || after.Targets[0].Ready {
+		t.Fatal("checkpoint not confirmed", after)
+	}
+
+	<-cancelled
+
+	if err = <-pending; err == nil {
+		t.Fatal("interrupted approval became a confirmed decision")
+	}
+
+	_, err = activation.Call(t.Context(), endpoint, request)
+	testutil.Check(t, err)
+
+	if calls.Load() != 1 {
+		t.Fatal("checkpoint replayed approval")
+	}
+
+	request.Action = "restore"
+	_, err = activation.Call(t.Context(), endpoint, request)
+	testutil.Check(t, err)
+
+	request.Action = "checkpoint"
+	if _, err = activation.Call(t.Context(), endpoint, request); err == nil {
+		t.Fatal("consumed checkpoint was repeated")
+	}
+
+	stopBroker()
+	broker(t, dir)
+	waitSocket(t, activation.ControlSocket(endpoint))
+
+	if _, err = activation.Call(t.Context(), endpoint, request); err == nil {
+		t.Fatal("replacement accepted previous process incarnation")
 	}
 }

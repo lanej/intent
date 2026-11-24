@@ -14,11 +14,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/lanej/intent/internal/activation"
 	"github.com/lanej/intent/internal/approvaldiscovery"
 	"github.com/lanej/intent/internal/approvalforward"
 	"github.com/lanej/intent/internal/approvalwire"
@@ -493,7 +495,29 @@ func serve(ctx context.Context, path string, authenticate intent.Authenticate) e
 	// Retain diagnostic identity on shutdown; a later owner validates PID and
 	// start time. Shutdown must not delete a replacement metadata file.
 
-	service := &intent.Service{Host: p.Host, Session: serviceID, Authenticate: authenticate, Shared: true}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-	return service.Serve(ctx, listener)
+	lifecycle, err := activation.New("local:"+p.LocalSocket, runtime.GOOS, runtime.GOARCH, cancel)
+	if err != nil {
+		return err
+	}
+
+	lifecycle.SetMacID(p.MacID)
+
+	control, err := approvalforward.Listen(ctx, activation.ControlSocket(p.LocalSocket))
+	if err != nil {
+		return err
+	}
+	defer cleanup.Close(control)
+
+	controller := make(chan error, 1)
+	go func() { controller <- lifecycle.ServeControl(ctx, control); cancel() }()
+
+	service := &intent.Service{Host: p.Host, Session: serviceID, Authenticate: authenticate, Shared: true, Lifecycle: lifecycle}
+	serviceErr := service.Serve(ctx, listener)
+
+	cancel()
+
+	return errors.Join(serviceErr, <-controller)
 }

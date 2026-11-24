@@ -12,12 +12,14 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/lanej/intent/internal/activation"
 	"github.com/lanej/intent/internal/approvaldiscovery"
 	"github.com/lanej/intent/internal/approvalwire"
 	"github.com/lanej/intent/internal/cleanup"
@@ -273,7 +275,33 @@ func ServeRemote(parent context.Context, dir, mac string) error {
 	stop := context.AfterFunc(ctx, func() { cleanup.Close(listener) })
 	defer stop()
 
-	var handlers sync.WaitGroup
+	hostname, err := os.Hostname()
+	if err != nil {
+		return err
+	}
+
+	lifecycle, err := activation.New("remote:"+hostname+":"+dir, runtime.GOOS, runtime.GOARCH, cancel)
+	if err != nil {
+		return err
+	}
+
+	lifecycle.SetMacID(mac)
+
+	control, err := Listen(ctx, activation.ControlSocket(filepath.Join(dir, "approval.sock")))
+	if err != nil {
+		return err
+	}
+	defer cleanup.Close(control)
+
+	controller := make(chan error, 1)
+	go func() { controller <- lifecycle.ServeControl(ctx, control); cancel() }()
+
+	defer func() { cancel(); <-controller }()
+
+	var (
+		handlers     sync.WaitGroup
+		connectionID uint64
+	)
 
 	handlers.Add(1)
 	go func() { defer handlers.Done(); sweep(ctx, dir, mac) }()
@@ -290,8 +318,16 @@ func ServeRemote(parent context.Context, dir, mac string) error {
 			return acceptErr
 		}
 
+		connectionID++
+
+		requestCtx, done, admissionErr := lifecycle.Begin(ctx, fmt.Sprintf("connection-%d", connectionID))
+		if admissionErr != nil {
+			cleanup.Close(conn)
+			continue
+		}
+
 		handlers.Add(1)
-		go func() { defer handlers.Done(); handle(ctx, conn, dir, mac) }()
+		go func() { defer handlers.Done(); defer done(); handle(requestCtx, conn, dir, mac) }()
 	}
 }
 

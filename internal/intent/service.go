@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lanej/intent/internal/activation"
 	"github.com/lanej/intent/internal/cleanup"
 
 	approval "github.com/lanej/intent"
@@ -34,6 +35,7 @@ type Service struct {
 	Shared       bool
 	Session      string
 	Authenticate Authenticate
+	Lifecycle    *activation.Runtime
 	mu           sync.Mutex
 	active       bool
 }
@@ -143,6 +145,23 @@ func (s *Service) handle(parent context.Context, conn net.Conn) {
 	var agent *approval.AgentIdentity
 	if request.Agent != nil {
 		agent = &approval.AgentIdentity{Type: request.Agent.Type, ID: request.Agent.ID}
+	}
+
+	if s.Lifecycle != nil {
+		requestCtx, done, err := s.Lifecycle.Begin(ctx, request.ID)
+		if err != nil {
+			response.Decision = string(approval.Unavailable)
+
+			reply()
+
+			return
+		}
+		defer done()
+
+		ctx = requestCtx
+
+		closeOnCancel := context.AfterFunc(ctx, func() { cleanup.Close(conn) })
+		defer closeOnCancel()
 	}
 
 	decision := approval.Unavailable
