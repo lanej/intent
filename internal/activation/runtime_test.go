@@ -9,10 +9,16 @@ import (
 )
 
 func TestStopAcceptanceFencesRestoreBeforeReply(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("native lifecycle owner identity is supported only on macOS and Linux")
+	}
+
 	var stops atomic.Int32
 
 	owner, err := New("owned-fixture", runtime.GOOS, runtime.GOARCH, func() { stops.Add(1) })
-	testutil.Check(t, err)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	request := Request{Action: "checkpoint", RunID: "11111111-2222-4333-8444-555555555555", Process: owner.Snapshot().Targets[0].Process}
 	_, _, err = owner.Control(t.Context(), request)
